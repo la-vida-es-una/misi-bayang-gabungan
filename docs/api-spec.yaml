@@ -1,0 +1,453 @@
+openapi: 3.0.4
+info:
+  version: '1.0'
+  title: Misi Bayang Gabungan - API Specification
+  description: |-
+    aksjdfgakjsfhad
+
+tags:
+  - name: Drone
+    description: Segala endpoint yang berhubungan dengan drone 
+  - name: State
+    description: Segala endpoint yang berhubungan dengan state
+  - name: Rescue
+    description: Segala endpoint yang berhubungan dengan korban/penyelamatan
+  - name: Logging
+    description: Segala endpoint yang berhubungan dengan logging
+paths:
+  /drone:
+    post:
+      tags:
+        - Drone
+      summary: Tambah Drone
+      description: Menambah drone baru ke simulasi
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 1
+                power:
+                  type: integer
+                  example: 27
+                position:
+                  type: array
+                  items:
+                    type: integer
+                  minItems: 2
+                  maxItems: 2
+                  example: [0, 6]
+              required:
+                - id
+                - power
+                - position
+      responses:
+        "201":
+          description: Successfully added new drone
+        default:
+          description: Unexpected error
+
+    get:
+      tags:
+        - Drone
+      summary: Ambil semua drone
+      description: Mengambil daftar drone dalam simulasi
+      responses:
+        "200":
+          description: List of drones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    power:
+                      type: integer
+                    position:
+                      type: array
+                      items:
+                        type: integer
+                      minItems: 2
+                      maxItems: 2
+      
+
+  /drone/{droneId}:
+    get:
+      tags:
+        - Drone
+      summary: Ambil drone berdasarkan ID
+      description: Mengambil informasi drone tertentu dalam simulasi
+      parameters:
+        - name: droneId
+          in: path
+          required: true
+          description: ID drone
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Drone ditemukan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  power:
+                    type: integer
+                  position:
+                    type: array
+                    items:
+                      type: integer
+                    minItems: 2
+                    maxItems: 2
+        "404":
+          description: Drone tidak ditemukan
+
+    delete:
+      tags:
+        - Drone
+      summary: Hapus drone
+      description: Menghapus drone dari simulasi
+      parameters:
+        - name: droneId
+          in: path
+          required: true
+          description: ID drone yang akan dihapus
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Drone berhasil dihapus
+        "404":
+          description: Drone tidak ditemukan
+  
+  /drone/{droneId}/position:
+    put:
+      tags:
+        - Drone
+      summary: Update posisi drone
+      description: Memperbarui posisi drone dalam simulasi
+      parameters:
+        - name: droneId
+          in: path
+          required: true
+          description: ID drone
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                position:
+                  type: array
+                  items:
+                    type: integer
+                  minItems: 2
+                  maxItems: 2
+                  example: [3, 4]
+              required:
+                - position
+      responses:
+        "200":
+          description: Posisi drone berhasil diperbarui
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  power:
+                    type: integer
+                  position:
+                    type: array
+                    items:
+                      type: integer
+                    minItems: 2
+                    maxItems: 2
+        "404":
+          description: Drone tidak ditemukan
+
+
+  /state:
+    get:
+      tags:
+        - State
+      summary: Ambil state simulasi
+      description: Mengambil grid simulasi 2D termasuk drone, obstacle, dan victim
+      responses:
+        "200":
+          description: Current simulation state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  grid_size:
+                    type: array
+                    items:
+                      type: integer
+                    example: [20, 20]
+                  drones:
+                    type: array
+                    items:
+                      type: object
+                  obstacles:
+                    type: array
+                    items:
+                      type: object
+                  victims:
+                    type: array
+                    items:
+                      type: object
+
+
+  /obstacle:
+    post:
+      tags:
+        - State
+      summary: Tambah obstacle
+      description: Menambahkan obstacle ke grid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 1
+                position:
+                  type: array
+                  items:
+                    type: integer
+                  minItems: 2
+                  maxItems: 2
+                  example: [4, 7]
+              required:
+                - position
+      responses:
+        "201":
+          description: Obstacle berhasil ditambahkan
+
+  /obstacle/{obstacleId}:
+    patch:
+      tags:
+        - State
+      summary: Update obstacle
+      description: Memperbarui posisi obstacle
+      parameters:
+        - name: obstacleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                position:
+                  type: array
+                  items:
+                    type: integer
+                  minItems: 2
+                  maxItems: 2
+                  example: [5, 9]
+      responses:
+        "200":
+          description: Obstacle updated
+        "404":
+          description: Obstacle not found
+
+    delete:
+      tags:
+        - State
+      summary: Hapus obstacle
+      description: Menghapus obstacle dari grid
+      parameters:
+        - name: obstacleId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Obstacle deleted
+        "404":
+          description: Obstacle not found
+
+
+  /victim:
+    post:
+      tags:
+        - Rescue
+      summary: Tambah victim manual
+      description: Menambahkan victim pada posisi tertentu
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                position:
+                  type: array
+                  items:
+                    type: integer
+                  minItems: 2
+                  maxItems: 2
+                  example: [8, 3]
+                temperature:
+                  type: number
+                  example: 36.5
+              required:
+                - position
+                - temperature
+      responses:
+        "201":
+          description: Victim berhasil ditambahkan
+
+  /victim/random:
+    post:
+      tags:
+        - Rescue
+      summary: Tambah victim random
+      description: Menambahkan victim di posisi acak pada grid
+      responses:
+        "201":
+          description: Victim random berhasil dibuat
+
+
+  /victim/{victimId}:
+    put:
+      tags:
+        - Rescue
+      summary: Edit victim
+      description: Memperbarui posisi atau temperatur victim
+      parameters:
+        - name: victimId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                position:
+                  type: array
+                  items:
+                    type: integer
+                  minItems: 2
+                  maxItems: 2
+                  example: [6, 10]
+                temperature:
+                  type: number
+                  example: 37.2
+      responses:
+        "200":
+          description: Victim updated
+        "404":
+          description: Victim not found
+
+  /handle_rescue/{droneId}:
+    post:
+      tags:
+        - Rescue
+      summary: Proses rescue oleh drone
+      description: Drone melakukan scan area sekitar, bergerak menuju victim jika ditemukan, lalu melakukan penyelamatan
+      parameters:
+        - name: droneId
+          in: path
+          required: true
+          description: ID drone yang melakukan proses rescue
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Hasil proses rescue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  droneId:
+                    type: integer
+                    example: 1
+                  victimFound:
+                    type: boolean
+                    example: true
+                  victimId:
+                    type: integer
+                    example: 3
+                  droneStartPosition:
+                    type: array
+                    items:
+                      type: integer
+                    example: [4, 4]
+                  victimPosition:
+                    type: array
+                    items:
+                      type: integer
+                    example: [6, 4]
+                  droneFinalPosition:
+                    type: array
+                    items:
+                      type: integer
+                    example: [6, 4]
+                  status:
+                    type: string
+                    example: rescued
+        "404":
+          description: Drone tidak ditemukan
+
+
+  /logs:
+    get:
+      tags:
+        - Logging
+      summary: Ambil semua log simulasi
+      description: Mengambil seluruh log aktivitas dalam simulasi
+      responses:
+        "200":
+          description: List of logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                      example: 1
+                    timestamp:
+                      type: string
+                      example: "2026-03-14T20:10:32Z"
+                    droneId:
+                      type: integer
+                      example: 2
+                    event:
+                      type: string
+                      example: "scan"
+                    description:
+                      type: string
+                      example: "Drone scanned nearby area"
