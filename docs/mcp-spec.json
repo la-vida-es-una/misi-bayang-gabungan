@@ -1,0 +1,112 @@
+{
+  "name": "Misi Bayang Gabungan - MCP Specification",
+  "description": "Drone search and rescue simulation system",
+  "tools": [
+    {
+      "name": "create_drone",
+      "description": "Create a new drone in the simulation",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "power": { "type": "integer" },
+          "position": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": ["id", "power", "position"]
+      }
+    },
+
+    {
+      "name": "get_drones",
+      "description": "Get all drones in the simulation",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+
+    {
+      "name": "move_drone",
+      "description": "Update the position of a drone",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "droneId": { "type": "integer" },
+          "position": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "required": ["droneId", "position"]
+      }
+    },
+
+    {
+      "name": "get_simulation_state",
+      "description": "Retrieve the current simulation grid state",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+
+    {
+      "name": "add_victim",
+      "description": "Add a victim manually to the grid",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "temperature": {
+            "type": "number"
+          }
+        },
+        "required": ["position", "temperature"]
+      }
+    },
+
+    {
+      "name": "add_random_victim",
+      "description": "Add a victim at a random location",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+
+    {
+      "name": "handle_rescue",
+      "description": "Drone scans nearby area, moves to victim if found, and performs rescue",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "droneId": {
+            "type": "integer"
+          }
+        },
+        "required": ["droneId"]
+      }
+    },
+
+    {
+      "name": "get_logs",
+      "description": "Retrieve simulation logs",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}
