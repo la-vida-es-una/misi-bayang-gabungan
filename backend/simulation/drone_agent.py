@@ -1,0 +1,290 @@
+from __future__ import annotations
+import math
+from enum import Enum
+from mesa import Agent
+
+from simulation.survivor import SurvivorAgent, SurvivorState
+
+
+class DroneState(str, Enum):
+    EXPLORE = "explore"
+    CONVERGE = "converge"
+    RETURN = "return"
+
+
+class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
+    """
+    Autonomous rescue drone with a three-state FSM.
+
+    States
+    ------
+    EXPLORE
+        Steers toward unvisited grid cells. Detects survivors and obstacle
+        edges within vision_radius. Shares discoveries with nearby drones
+        over the comm mesh. Switches to CONVERGE when a survivor is known.
+
+    CONVERGE
+        Pursues a known survivor's cell. On arrival, marks the survivor
+        as RESCUED and transitions to RETURN. Also transitions to RETURN
+        if battery falls below low_battery threshold.
+
+    RETURN
+        Flies back to the base cell. On arrival, recharges battery to 100,
+        clears personal knowledge, and re-enters EXPLORE.
+
+    Attributes
+    ----------
+    battery : float
+        Percentage (0–100). Decreases by battery_drain each tick.
+    visited_cells : set[tuple[int,int]]
+        Cells this drone has personally scanned.
+    known_survivors : list[SurvivorAgent]
+        Survivors this drone knows about (own detection + comm mesh).
+    known_edges : set[tuple]
+        Obstacle edges this drone has sampled.
+    target_survivor : SurvivorAgent | None
+        The survivor currently being pursued in CONVERGE state.
+    """
+
+    def __init__(
+        self,
+        model: "SARWorld",
+        vision_radius: float = 8.0,
+        comm_radius: float = 18.0,
+        battery_drain: float = 0.9,
+        low_battery: float = 20.0,
+        speed: float = 1.0,
+    ) -> None:
+        super().__init__(model)
+        self.vision_radius = vision_radius
+        self.comm_radius = comm_radius
+        self.battery_drain = battery_drain
+        self.low_battery = low_battery
+        self.speed = speed
+
+        self.state: DroneState = DroneState.EXPLORE
+        self.battery: float = 100.0
+
+        self.visited_cells: set[tuple[int, int]] = set()
+        self.known_survivors: list[SurvivorAgent] = []  # SurvivorAgent refs
+        self.known_edges: set[tuple] = set()  # frozenset edge keys
+
+        self.target_survivor = None
+        self._goal: tuple[int, int] | None = None
+
+    # ------------------------------------------------------------------
+    # Mesa step
+    # ------------------------------------------------------------------
+    def step(self) -> None:
+        self._drain_battery()
+        pos = self._pos()
+        self.visited_cells.add(pos)
+
+        self._sense(pos)
+        self._communicate(pos)
+
+        if self.state == DroneState.EXPLORE:
+            self._step_explore(pos)
+        elif self.state == DroneState.CONVERGE:
+            self._step_converge(pos)
+        elif self.state == DroneState.RETURN:
+            self._step_return(pos)
+
+    # ------------------------------------------------------------------
+    # FSM steps
+    # ------------------------------------------------------------------
+    def _step_explore(self, pos: tuple[int, int]) -> None:
+        if self.battery <= self.low_battery:
+            self.state = DroneState.RETURN
+            return
+
+        unrescued = [s for s in self.known_survivors if s.state.value == "found"]
+        if unrescued:
+            self.target_survivor = min(
+                unrescued,
+                key=lambda s: math.hypot(*self._vec_to(s._pos(), pos)),
+            )
+            self.state = DroneState.CONVERGE
+            return
+
+        if not self._goal or pos == self._goal:
+            self._goal = self._pick_explore_goal(pos)
+
+        self._move_toward(self._goal)
+
+    def _step_converge(self, pos: tuple[int, int]) -> None:
+        if self.battery <= self.low_battery:
+            self.target_survivor = None
+            self.state = DroneState.RETURN
+            return
+
+        if not self.target_survivor or self.target_survivor.state.value == "rescued":
+            self.target_survivor = None
+            self.state = DroneState.EXPLORE
+            return
+
+        target_pos = self.target_survivor._pos()
+        if pos == target_pos:
+            self.target_survivor.mark_rescued(self.unique_id)
+            self.known_survivors = [
+                s for s in self.known_survivors if s is not self.target_survivor
+            ]
+            self.target_survivor = None
+            self.state = DroneState.RETURN
+            return
+
+        self._move_toward(target_pos)
+
+    def _step_return(self, pos: tuple[int, int]) -> None:
+        base = self.model.base_pos
+        if pos == base:
+            self.battery = 100.0
+            self.known_survivors = []
+            self.known_edges = set()
+            self._goal = None
+            self.state = DroneState.EXPLORE
+            return
+        self._move_toward(base)
+
+    # ------------------------------------------------------------------
+    # Sensing
+    # ------------------------------------------------------------------
+    def _sense(self, pos: tuple[int, int]) -> None:
+        x, y = pos
+        # detect survivors
+        for agent in self.model.agents:  # pyright: ignore[reportAttributeAccessIssue]
+            from .survivor import SurvivorAgent
+
+            if isinstance(agent, SurvivorAgent) and agent.state != SurvivorState.RESCUED:
+                ax, ay = agent._pos()
+                if math.hypot(ax - x, ay - y) <= self.vision_radius:
+                    if agent.state == SurvivorState.UNSEEN:
+                        agent.mark_found(self.unique_id)
+                    if agent not in self.known_survivors:
+                        self.known_survivors.append(agent)
+
+        # sample obstacle edges
+        for agent in self.model.agents:  # pyright: ignore[reportAttributeAccessIssue]
+            from .obstacle import ObstacleAgent
+
+            if isinstance(agent, ObstacleAgent):
+                for edge in agent.get_visible_edges(x, y, self.vision_radius):
+                    key = (min(edge[0], edge[1]), max(edge[0], edge[1]))
+                    self.known_edges.add(key)
+
+    # ------------------------------------------------------------------
+    # Communication mesh
+    # ------------------------------------------------------------------
+    def _communicate(self, pos: tuple[int, int]) -> None:
+        x, y = pos
+        from .survivor import SurvivorAgent
+
+        for agent in self.model.agents:  # pyright: ignore[reportAttributeAccessIssue]
+            if not isinstance(agent, DroneAgent) or agent is self:
+                continue
+            ox, oy = agent._pos()
+            if math.hypot(ox - x, oy - y) <= self.comm_radius:
+                # share survivors
+                for s in agent.known_survivors:
+                    if s not in self.known_survivors:
+                        self.known_survivors.append(s)
+                # share edges
+                self.known_edges.update(agent.known_edges)
+
+    # ------------------------------------------------------------------
+    # Movement
+    # ------------------------------------------------------------------
+    def _move_toward(self, goal: tuple[int, int]) -> None:
+        pos = self._pos()
+        if pos == goal:
+            return
+        dx, dy = self._vec_to(goal, pos)
+        steps = max(1, round(self.speed))
+        cx, cy = pos
+        for _ in range(steps):
+            nx = cx + (1 if dx > 0 else -1 if dx < 0 else 0)
+            ny = cy + (1 if dy > 0 else -1 if dy < 0 else 0)
+            nx = max(0, min(self.model.grid.width - 1, nx))
+            ny = max(0, min(self.model.grid.height - 1, ny))
+            if not self.model.is_blocked(nx, ny):
+                self.model.grid.move_agent(self, (nx, ny))
+                cx, cy = nx, ny
+                dx, dy = self._vec_to(goal, (cx, cy))
+            else:
+                # try axis-aligned detour
+                if not self.model.is_blocked(nx, cy):
+                    self.model.grid.move_agent(self, (nx, cy))
+                    cx, cy = nx, cy
+                elif not self.model.is_blocked(cx, ny):
+                    self.model.grid.move_agent(self, (cx, ny))
+                    cx, cy = cx, ny
+                else:
+                    break
+
+    def _pick_explore_goal(self, pos: tuple[int, int]) -> tuple[int, int]:
+        """Score candidate cells: prefer unvisited, prefer spread from other drones."""
+        best, best_score = pos, -1.0
+        w, h = self.model.grid.width, self.model.grid.height
+        for _ in range(30):
+            gx = self.random.randint(0, w - 1)
+            gy = self.random.randint(0, h - 1)
+            if self.model.is_blocked(gx, gy):
+                continue
+            unvisited_bonus = 0 if (gx, gy) in self.visited_cells else 150
+            spread = sum(
+                math.hypot(gx - a._pos()[0], gy - a._pos()[1])
+                for a in self.model.agents  # pyright: ignore[reportAttributeAccessIssue]
+                if isinstance(a, DroneAgent) and a is not self
+            )
+            score = unvisited_bonus + spread * 0.3 + self.random.uniform(0, 25)
+            if score > best_score:
+                best_score = score
+                best = (gx, gy)
+        return best
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _drain_battery(self) -> None:
+        self.battery = max(0.0, self.battery - self.battery_drain)
+
+    def _pos(self) -> tuple[int, int]:
+        return self.model.grid.find_empty()  # overridden below
+
+    def _vec_to(
+        self, goal: tuple[int, int], origin: tuple[int, int]
+    ) -> tuple[int, int]:
+        return goal[0] - origin[0], goal[1] - origin[1]
+
+    # ------------------------------------------------------------------
+    # Serialisation
+    # ------------------------------------------------------------------
+    def to_dict(self) -> dict:
+        x, y = self._pos()
+        return {
+            "id": self.unique_id,
+            "x": x,
+            "y": y,
+            "state": self.state.value,
+            "battery": round(self.battery, 1),
+            "visited_cells": len(self.visited_cells),
+            "known_survivors": [s.unique_id for s in self.known_survivors],
+            "known_edges": len(self.known_edges),
+            "target_survivor": (
+                self.target_survivor.unique_id if self.target_survivor else None
+            ),
+        }
+
+
+# ------------------------------------------------------------------
+# Monkey-patch _pos to use Mesa grid properly
+# ------------------------------------------------------------------
+def _real_pos(self) -> tuple[int, int]:
+    for content, (x, y) in self.model.grid.coord_iter():
+        for agent in content:
+            if agent is self:
+                return (x, y)
+    return (-1, -1)
+
+
+DroneAgent._pos = _real_pos  # type: ignore[method-assign]
