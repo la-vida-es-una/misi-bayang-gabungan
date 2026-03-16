@@ -35,11 +35,13 @@ Quick-start
     result = await agent.run_mission()
 """
 
+from .callbacks import ObserverCallbackHandler
 from .interfaces import (
     AgentObserverProtocol,
     MCPClientProtocol,
     NullObserver,
 )
+from .live_client import LiveMCPClient
 from .mission_log import MissionLogger
 from .mock_client import MockMCPClient
 from .orchestrator import MissionOrchestrator, create_agent
@@ -54,4 +56,6 @@ __all__ = [
     "AgentObserverProtocol",
     "NullObserver",
     "MockMCPClient",
+    "LiveMCPClient",
+    "ObserverCallbackHandler",
 ]
