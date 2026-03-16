@@ -292,9 +292,15 @@ class MissionOrchestrator:
             self._logger.log_reasoning(0, f"Mission objective: {objective}")
             self._observer.on_step_start(0, {"objective": objective})
 
+            from .callbacks import ObserverCallbackHandler
+
+            handler = ObserverCallbackHandler(self._observer)
             result = await self._agent.ainvoke(
                 {"messages": [HumanMessage(content=objective + context)]},
-                config={"recursion_limit": effective_max_steps * 2},
+                config={
+                    "recursion_limit": effective_max_steps * 2,
+                    "callbacks": [handler],
+                },
             )
 
             # ── extract final output ────────────────────────────────
