@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MISI BAYANG — SAR Mission Control</title>
+  <style>
+    html, body { margin:0; padding:0; width:100%; height:100vh; background:#050a0f; overflow:hidden; font-family:'Courier New',monospace; color:#c8e8ff; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+
+    /* ── Three-column layout ────────────────────────────────────── */
+    #app-layout { display:flex; width:100%; height:100vh; }
+
+    .panel {
+      width:280px; min-width:280px; height:100vh;
+      background:rgba(5,10,20,0.95); border-right:0.5px solid rgba(68,170,255,0.15);
+      display:flex; flex-direction:column; overflow:hidden;
+    }
+    .panel:last-child { border-right:none; border-left:0.5px solid rgba(68,170,255,0.15); }
+
+    .panel-title {
+      font-size:10px; letter-spacing:.18em; color:#4af; padding:10px 12px 6px;
+      text-transform:uppercase; border-bottom:0.5px solid rgba(68,170,255,0.12);
+      flex-shrink:0;
+    }
+    .panel-empty { font-size:9px; color:#456; padding:12px; letter-spacing:.1em; }
+    .filter-badge { color:#fa4; }
+
+    #center-col { flex:1; position:relative; overflow:hidden; }
+
+    /* ── Canvas + HUD (center) ──────────────────────────────────── */
+    #debrief {
+      background:#060d14; width:100%; height:100%;
+      position:relative; overflow:hidden;
+    }
+    canvas { position:absolute; top:0; left:0; width:100%; height:100%; }
+
+    #hud { position:absolute; inset:0; pointer-events:none; }
+
+    #top-bar {
+      position:absolute; top:0; left:0; right:0; padding:10px 16px;
+      display:flex; justify-content:space-between; align-items:flex-start;
+    }
+    .mission-tag  { font-size:9px; letter-spacing:.18em; color:#4af; opacity:.85; text-transform:uppercase; }
+    .mission-title { font-size:13px; letter-spacing:.12em; color:#e8f4ff; font-weight:bold; margin-top:2px; }
+    .time-display  { text-align:right; font-size:9px; color:#4af; letter-spacing:.1em; opacity:.8; }
+
+    .corner { position:absolute; width:20px; height:20px; opacity:.5; }
+    .corner.tl { top:6px; left:6px;  border-top:1px solid #4af; border-left:1px solid #4af; }
+    .corner.tr { top:6px; right:6px; border-top:1px solid #4af; border-right:1px solid #4af; }
+    .corner.bl { bottom:6px; left:6px;  border-bottom:1px solid #4af; border-left:1px solid #4af; }
+    .corner.br { bottom:6px; right:6px; border-bottom:1px solid #4af; border-right:1px solid #4af; }
+
+    #scan-line {
+      position:absolute; left:0; right:0; height:1px;
+      background:rgba(68,170,255,.08); animation:scan 3s linear infinite; pointer-events:none;
+    }
+    @keyframes scan { 0%{top:-1px} 100%{top:100%} }
+
+    #ws-badge {
+      position:absolute; top:42px; right:16px;
+      font-size:8px; letter-spacing:.16em; text-transform:uppercase;
+    }
+    .ws-offline    { color:#f44; }
+    .ws-connecting { color:#fa4; }
+    .ws-connected  { color:#4f8; }
+
+    #event-log { position:absolute; top:60px; right:16px; width:180px; }
+    .event-item {
+      font-size:8px; color:#4af; letter-spacing:.06em; margin-bottom:3px;
+      text-align:right; text-transform:uppercase; animation:fadeIn .3s forwards;
+    }
+    @keyframes fadeIn { to{opacity:1} }
+
+    #result-banner {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      text-align:center; opacity:0; transition:opacity .8s;
+    }
+    #result-banner.show { opacity:1; }
+    .result-text { font-size:24px; letter-spacing:.3em; color:#e8f4ff; font-weight:bold; text-transform:uppercase; }
+    .result-sub  { font-size:9px; letter-spacing:.2em; color:#4af; margin-top:4px; text-transform:uppercase; }
+
+    #stats-panel { position:absolute; bottom:44px; left:16px; min-width:150px; }
+    .stat-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+    .stat-label { font-size:8px; letter-spacing:.12em; color:#4af; text-transform:uppercase; width:80px; }
+    .stat-value { font-size:11px; color:#e8f4ff; font-weight:bold; letter-spacing:.06em; }
+
+    #camera-label { position:absolute; bottom:44px; right:16px; text-align:right; }
+    .cam-tag  { font-size:8px; letter-spacing:.16em; color:#4af; opacity:.7; text-transform:uppercase; }
+    .cam-name { font-size:10px; color:#c8e8ff; letter-spacing:.1em; margin-top:2px; opacity:.9; }
+
+    #ctrl-bar {
+      position:absolute; bottom:0; left:0; right:0;
+      display:flex; gap:6px; padding:8px 12px;
+      background:rgba(5,10,15,.85); border-top:.5px solid rgba(68,170,255,.2);
+      pointer-events:all;
+    }
+    #ctrl-bar button {
+      font-size:9px; letter-spacing:.1em; padding:3px 10px;
+      border:.5px solid rgba(68,170,255,.5); background:rgba(68,170,255,.08);
+      color:#4af; cursor:pointer; text-transform:uppercase; font-family:'Courier New',monospace;
+    }
+    #ctrl-bar button:hover:not(:disabled) { background:rgba(68,170,255,.18); }
+    #ctrl-bar button:disabled { opacity:.35; cursor:not-allowed; }
+    .sep { flex:1; }
+    #progress-wrap { display:flex; align-items:center; gap:6px; flex:2; }
+    #progress-bar  { flex:1; height:2px; background:#0d2030; position:relative; }
+    #progress-fill { height:100%; background:#4af; width:0%; transition:width .3s; }
+    #prog-time  { font-size:8px; color:#4af; letter-spacing:.08em; min-width:40px; }
+    #cov-label  { font-size:8px; color:#4af; letter-spacing:.1em; opacity:.7; }
+
+    /* ── Drone Panel (left) ─────────────────────────────────────── */
+    .drone-panel .drone-list { overflow-y:auto; flex:1; padding:4px 0; }
+
+    .drone-card {
+      margin:4px 8px; padding:6px 8px; cursor:pointer;
+      border:0.5px solid rgba(68,170,255,0.15); border-radius:2px;
+      background:rgba(10,20,35,0.6); transition:background .15s, border-color .15s;
+    }
+    .drone-card:hover { background:rgba(20,40,60,0.6); }
+    .drone-card.selected { background:rgba(20,40,70,0.8); }
+
+    .drone-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+    .drone-name { font-size:10px; font-weight:bold; letter-spacing:.12em; }
+    .drone-state { font-size:8px; letter-spacing:.14em; font-weight:bold; }
+
+    .drone-attrs { }
+    .attr-row { display:flex; justify-content:space-between; padding:1px 0; }
+    .attr-label { font-size:7px; color:#4a7a9a; letter-spacing:.1em; text-transform:uppercase; }
+    .attr-value { font-size:8px; color:#8ac; letter-spacing:.04em; }
+
+    .survivor-list { overflow-y:auto; flex:1; padding:4px 8px; }
+    .survivor-row {
+      display:flex; gap:6px; align-items:center; padding:2px 0;
+      font-size:8px; letter-spacing:.06em;
+    }
+    .surv-id { color:#556; width:24px; }
+    .surv-state { width:54px; font-weight:bold; letter-spacing:.1em; }
+    .surv-pos { color:#4a7a9a; width:50px; }
+    .surv-detail { color:#456; font-size:7px; }
+
+    /* ── Log Panel (right) ──────────────────────────────────────── */
+    .log-panel .log-scroll { overflow-y:auto; flex:1; padding:4px 0; }
+
+    .log-entry {
+      margin:2px 8px; padding:4px 6px;
+      border-left:2px solid rgba(68,170,255,0.15);
+      background:rgba(10,20,35,0.4);
+    }
+    .log-entry.transition {
+      border-left-color:#fa4;
+      background:rgba(30,25,15,0.5);
+    }
+
+    .log-header {
+      display:flex; gap:8px; align-items:center; margin-bottom:2px;
+    }
+    .log-tick { font-size:7px; color:#456; letter-spacing:.08em; min-width:30px; }
+    .log-drone { font-size:8px; font-weight:bold; color:#4af; letter-spacing:.1em; }
+    .log-state { font-size:7px; font-weight:bold; letter-spacing:.12em; }
+    .log-batt { font-size:7px; color:#4a7a9a; margin-left:auto; }
+
+    .log-reasoning { }
+    .reason-line {
+      font-size:8px; color:#6a9ab8; padding:1px 0 1px 6px;
+      border-left:1px solid rgba(68,170,255,0.08);
+      letter-spacing:.03em; line-height:1.4;
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script defer src="/dist/main.js"></script>
+</body>
+</html>
