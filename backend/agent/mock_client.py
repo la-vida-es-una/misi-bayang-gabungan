@@ -10,13 +10,14 @@ Fully implements MCPClientProtocol with an internal simulated world:
 from __future__ import annotations
 
 import random
-from typing import Any
+from typing import Any, final
 
 from colorama import Fore, Style
 
 from .interfaces import DroneStatus, GridMap, MoveResult, ScanResult
 
 
+@final
 class MockMCPClient:
     """
     Standalone mock that fully satisfies ``MCPClientProtocol``.
@@ -85,9 +86,7 @@ class MockMCPClient:
 
     async def list_active_drones(self) -> dict[str, list[str]]:
         """Return all active (non-dead) drone IDs."""
-        active = [
-            did for did, d in self._drones.items() if d["state"] != "dead"
-        ]
+        active = [did for did, d in self._drones.items() if d["state"] != "dead"]
         self._log(Fore.BLUE, "list_active_drones", f"{len(active)} active")
         return {"drones": active}
 
@@ -98,7 +97,7 @@ class MockMCPClient:
             Fore.BLUE,
             "get_drone_status",
             f"{drone_id} → bat={drone['battery']}% pos=({drone['x']},{drone['y']}) "
-            f"state={drone['state']}",
+            + f"state={drone['state']}",
         )
         return DroneStatus(
             drone_id=drone["drone_id"],
@@ -114,13 +113,17 @@ class MockMCPClient:
 
         if drone["state"] == "dead":
             self._log(Fore.RED, "move_to", f"{drone_id} is DEAD — cannot move")
-            return MoveResult(success=False, drone_id=drone_id, x=drone["x"], y=drone["y"])
+            return MoveResult(
+                success=False, drone_id=drone_id, x=drone["x"], y=drone["y"]
+            )
 
         drone["battery"] = max(0, drone["battery"] - 3)
         if drone["battery"] <= 0:
             drone["state"] = "dead"
             self._log(Fore.RED, "move_to", f"{drone_id} battery DEPLETED → dead")
-            return MoveResult(success=False, drone_id=drone_id, x=drone["x"], y=drone["y"])
+            return MoveResult(
+                success=False, drone_id=drone_id, x=drone["x"], y=drone["y"]
+            )
 
         x = max(0, min(x, self._grid_size - 1))
         y = max(0, min(y, self._grid_size - 1))
@@ -147,13 +150,17 @@ class MockMCPClient:
 
         if drone["state"] == "dead":
             self._log(Fore.RED, "thermal_scan", f"{drone_id} is DEAD — cannot scan")
-            return ScanResult(survivor_detected=False, confidence=0.0, x=drone["x"], y=drone["y"])
+            return ScanResult(
+                survivor_detected=False, confidence=0.0, x=drone["x"], y=drone["y"]
+            )
 
         drone["battery"] = max(0, drone["battery"] - 1)
         if drone["battery"] <= 0:
             drone["state"] = "dead"
             self._log(Fore.RED, "thermal_scan", f"{drone_id} battery DEPLETED → dead")
-            return ScanResult(survivor_detected=False, confidence=0.0, x=drone["x"], y=drone["y"])
+            return ScanResult(
+                survivor_detected=False, confidence=0.0, x=drone["x"], y=drone["y"]
+            )
 
         drone["state"] = "scanning"
         dx, dy = drone["x"], drone["y"]
@@ -258,8 +265,7 @@ class MockMCPClient:
         """Look up a drone by ID, raise ValueError if not found."""
         if drone_id not in self._drones:
             raise ValueError(
-                f"Unknown drone '{drone_id}'. "
-                f"Available: {list(self._drones.keys())}"
+                f"Unknown drone '{drone_id}'. Available: {list(self._drones.keys())}"
             )
         return self._drones[drone_id]
 

@@ -2,9 +2,10 @@
 Mission control REST endpoints.
 
 Provides start/stop controls and status queries for an LLM-driven SAR mission.
-The MissionOrchestrator (LangGraph ReAct agent) controls all drone movements
-via MCP tools — no hardcoded FSM logic. A concurrent state broadcaster pushes
-world snapshots to the frontend canvas via WebSocket.
+The MissionOrchestrator (LangGraph ReAct agent) sets strategic waypoints while
+Mesa's autonomous FSM drives drone movement each tick. A concurrent state
+broadcaster advances the simulation and pushes world snapshots to the frontend
+canvas via WebSocket.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from simulation.drone_agent import DroneAgent
 from simulation.world import SARWorld
 
 logger = logging.getLogger(__name__)
@@ -36,7 +38,7 @@ class MissionConfig(BaseModel):
     n_obstacles: int = 0
     vision_radius: float = 3.0
     comm_radius: float = 8.0
-    battery_drain: float = 0.0  # LLM controls battery via LiveMCPClient
+    battery_drain: float = 0.5  # FSM drains battery each tick
     low_battery: float = 20.0
     speed: float = 1.0
     tick_interval: float = 0.5  # seconds between state broadcasts
@@ -51,15 +53,37 @@ async def _state_broadcaster(
     manager,
     tick_interval: float,
 ) -> None:
-    """Periodically broadcast world state to all WebSocket clients.
+    """Advance the Mesa simulation one tick and broadcast world state.
 
     This runs concurrently with the LLM orchestrator so the frontend
-    canvas updates in real time as drones move.
+    canvas updates in real time as drones move autonomously via their FSM.
     """
+    logger.info("State broadcaster started | tick_interval=%.3fs", tick_interval)
     try:
         while world.running:
+            # Advance simulation — all drone FSMs execute (sense, communicate, move)
+            world.step()
+
             state = world.get_state()
+            logger.debug(
+                "Broadcast tick | tick=%s | coverage=%s | mission_complete=%s",
+                state["tick"],
+                state["coverage_pct"],
+                state["mission_complete"],
+            )
             await manager.broadcast({"type": "tick", **state})
+
+            # Broadcast per-drone FSM reasoning logs
+            drone_logs = []
+            for agent in world.agents:
+                if isinstance(agent, DroneAgent) and agent._last_step_log:
+                    drone_logs.append(agent._last_step_log)
+            if drone_logs:
+                await manager.broadcast({
+                    "type": "sim_log",
+                    "tick": state["tick"],
+                    "drone_logs": drone_logs,
+                })
 
             if state["mission_complete"]:
                 rescued = sum(
@@ -81,6 +105,7 @@ async def _state_broadcaster(
             await asyncio.sleep(tick_interval)
 
     except asyncio.CancelledError:
+        logger.info("State broadcaster cancelled")
         pass
     except Exception as exc:
         logger.exception("State broadcaster crashed: %s", exc)
@@ -96,17 +121,25 @@ async def _orchestrated_mission(
 ) -> None:
     """Run the LLM-driven mission orchestrator + state broadcaster concurrently."""
     from api.state import app_state
-    from agent.live_client import LiveMCPClient
+    from agent.real_mcp_client import RealMCPClient
     from agent.orchestrator import MissionOrchestrator
     from api.websocket.observer import WebSocketObserver
     from config.settings import get_settings
+    import mcp_server.context as _mcp_ctx
+    import mcp_server.server  # noqa: F401 — registers all tool modules on context.mcp
 
     settings = get_settings()
+    logger.info("Orchestrated mission starting")
 
-    live_client = LiveMCPClient(world)
+    # Inject the mission's SARWorld into the MCP server context so that
+    # all MCP tools (discovery, movement, sensors, battery) operate on
+    # this instance rather than the default module-level singleton.
+    _mcp_ctx.set_world(world)
+
+    real_client = RealMCPClient(_mcp_ctx.mcp)
     observer = WebSocketObserver(manager)
     orchestrator = MissionOrchestrator(
-        mcp_client=live_client,
+        mcp_client=real_client,
         observer=observer,
         settings=settings,
     )
@@ -120,6 +153,7 @@ async def _orchestrated_mission(
     try:
         await orchestrator.run_mission()
     except asyncio.CancelledError:
+        logger.info("Orchestrated mission cancelled")
         pass
     except Exception as exc:
         logger.exception("Orchestrator crashed: %s", exc)
@@ -131,6 +165,7 @@ async def _orchestrated_mission(
             }
         )
     finally:
+        logger.info("Orchestrated mission finalizing")
         world.running = False
         broadcaster.cancel()
         try:
@@ -179,8 +214,20 @@ async def start_mission(config: MissionConfig) -> dict:
     """
     from api.state import app_state
 
+    logger.info(
+        "Mission start requested | drones=%d survivors=%d grid=%dx%d obstacles=%d tick=%.3fs seed=%s",
+        config.n_drones,
+        config.n_survivors,
+        config.width,
+        config.height,
+        config.n_obstacles,
+        config.tick_interval,
+        config.seed,
+    )
+
     # Cancel any in-flight mission gracefully
     if app_state.mission_task and not app_state.mission_task.done():
+        logger.info("Cancelling currently running mission before restart")
         app_state.mission_task.cancel()
         try:
             await app_state.mission_task
@@ -206,6 +253,7 @@ async def start_mission(config: MissionConfig) -> dict:
     app_state.mission_task = asyncio.create_task(
         _orchestrated_mission(world, app_state.manager, config.tick_interval)
     )
+    logger.info("Mission task created")
 
     await app_state.manager.broadcast(
         {
@@ -226,7 +274,10 @@ async def stop_mission() -> dict:
     """Cancel the running mission."""
     from api.state import app_state
 
+    logger.info("Mission stop requested")
+
     if app_state.mission_task and not app_state.mission_task.done():
+        logger.info("Cancelling active mission task")
         app_state.mission_task.cancel()
         try:
             await app_state.mission_task
@@ -234,6 +285,7 @@ async def stop_mission() -> dict:
             pass
 
     if app_state.world:
+        logger.info("Setting world.running=False")
         app_state.world.running = False
 
     await app_state.manager.broadcast(
@@ -251,6 +303,8 @@ async def get_state() -> dict:
     """Return a current snapshot of the simulation world."""
     from api.state import app_state
 
+    logger.debug("Mission state requested")
+
     if not app_state.world:
         raise HTTPException(status_code=404, detail="No active mission")
     return app_state.world.get_state()
@@ -261,6 +315,8 @@ async def get_drones() -> dict:
     """Return the list of all active drones and their status."""
     from api.state import app_state
 
+    logger.debug("Mission drones requested")
+
     if not app_state.world:
         raise HTTPException(status_code=404, detail="No active mission")
     return {"drones": app_state.world.list_active_drones()}
@@ -270,5 +326,7 @@ async def get_drones() -> dict:
 async def get_logs(limit: int = 50) -> dict:
     """Return the most recent *limit* buffered agent/tool-call log entries."""
     from api.state import app_state
+
+    logger.debug("Mission logs requested | limit=%d", limit)
 
     return {"logs": app_state.agent_logs[-limit:]}

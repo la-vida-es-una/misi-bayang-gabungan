@@ -10,8 +10,13 @@ import { useWebSocket } from "./useWebSocket";
 import { SimulationCanvas } from "./SimulationCanvas";
 import { DronePanel } from "./DronePanel";
 import { LogPanel } from "./LogPanel";
+import { logDebug, logError, logInfo } from "./logger";
 
 function apiBase(): string {
+  logDebug("App.apiBase", "Resolving API base URL", {
+    host: window.location.host,
+    port: window.location.port,
+  });
   if (window.location.port === "3000") return "http://localhost:8000";
   return "";
 }
@@ -19,6 +24,7 @@ function apiBase(): string {
 function useClock(): string {
   const [clock, setClock] = useState("00:00:00");
   useEffect(() => {
+    logInfo("App.useClock", "Clock interval started");
     const id = setInterval(() => {
       const ts = Date.now();
       const hh = String(Math.floor((ts / 3600000) % 24)).padStart(2, "0");
@@ -26,37 +32,51 @@ function useClock(): string {
       const ss = String(Math.floor((ts / 1000) % 60)).padStart(2, "0");
       setClock(`${hh}:${mm}:${ss}`);
     }, 1000);
-    return () => clearInterval(id);
+    return () => {
+      clearInterval(id);
+      logInfo("App.useClock", "Clock interval cleared");
+    };
   }, []);
   return clock;
 }
 
 export function App() {
+  logDebug("App", "Render start");
   useWebSocket();
   const clock = useClock();
   const state = useMissionState();
 
   async function startMission() {
+    logInfo("App.startMission", "Start button clicked");
     try {
       const resp = await fetch(`${apiBase()}/mission/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
+      logInfo("App.startMission", "Start API response received", {
+        ok: resp.ok,
+        status: resp.status,
+      });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
-        console.error("Start failed:", err.detail || "unknown error");
+        logError("App.startMission", "Start failed", err.detail || "unknown error");
       }
     } catch (e: unknown) {
-      console.error("Network error:", e);
+      logError("App.startMission", "Network error", e);
     }
   }
 
   async function stopMission() {
+    logInfo("App.stopMission", "Stop button clicked");
     try {
-      await fetch(`${apiBase()}/mission/stop`, { method: "POST" });
-    } catch {
-      // ignore
+      const resp = await fetch(`${apiBase()}/mission/stop`, { method: "POST" });
+      logInfo("App.stopMission", "Stop API response received", {
+        ok: resp.ok,
+        status: resp.status,
+      });
+    } catch (e: unknown) {
+      logError("App.stopMission", "Stop request failed", e);
     }
   }
 

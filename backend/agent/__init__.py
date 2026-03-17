@@ -46,6 +46,7 @@ from .mission_log import MissionLogger
 from .mock_client import MockMCPClient
 from .orchestrator import MissionOrchestrator, create_agent
 from .planner import SectorPlanner
+from .real_mcp_client import RealMCPClient
 
 __all__ = [
     "MissionOrchestrator",
@@ -57,5 +58,6 @@ __all__ = [
     "NullObserver",
     "MockMCPClient",
     "LiveMCPClient",
+    "RealMCPClient",
     "ObserverCallbackHandler",
 ]

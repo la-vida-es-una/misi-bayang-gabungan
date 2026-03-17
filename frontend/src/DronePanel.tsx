@@ -4,6 +4,7 @@
  */
 
 import { useMissionState, useMissionDispatch } from "./store";
+import { logDebug, logInfo } from "./logger";
 
 const DRONE_NAMES = [
   "ALPHA",
@@ -25,6 +26,7 @@ const DRONE_COLORS = [
 ];
 
 function stateLabel(s: string): string {
+  logDebug("DronePanel.stateLabel", "Compute state label", { state: s });
   switch (s) {
     case "explore":
       return "EXPLORE";
@@ -38,6 +40,7 @@ function stateLabel(s: string): string {
 }
 
 function stateColor(s: string): string {
+  logDebug("DronePanel.stateColor", "Compute state color", { state: s });
   switch (s) {
     case "explore":
       return "#4fa";
@@ -51,10 +54,12 @@ function stateColor(s: string): string {
 }
 
 export function DronePanel() {
+  logDebug("DronePanel", "Render start");
   const { liveState, selectedDroneId } = useMissionState();
   const dispatch = useMissionDispatch();
 
   if (!liveState) {
+    logInfo("DronePanel", "No live state available");
     return (
       <div className="panel drone-panel">
         <div className="panel-title">DRONE TELEMETRY</div>
@@ -77,10 +82,14 @@ export function DronePanel() {
               className={`drone-card ${selected ? "selected" : ""}`}
               style={{ borderColor: selected ? color : "rgba(68,170,255,0.15)" }}
               onClick={() =>
+                (logInfo("DronePanel", "Drone card clicked", {
+                  droneId: d.id,
+                  currentlySelected: selected,
+                }),
                 dispatch({
                   type: "SELECT_DRONE",
                   droneId: selected ? null : d.id,
-                })
+                }))
               }
             >
               <div className="drone-header">
@@ -131,6 +140,14 @@ export function DronePanel() {
                   <span className="attr-value">
                     {d.target_survivor !== null
                       ? `Survivor #${d.target_survivor}`
+                      : "none"}
+                  </span>
+                </div>
+                <div className="attr-row">
+                  <span className="attr-label">WAYPOINT</span>
+                  <span className="attr-value">
+                    {d.llm_waypoint
+                      ? `(${d.llm_waypoint[0]}, ${d.llm_waypoint[1]})`
                       : "none"}
                   </span>
                 </div>

@@ -28,6 +28,19 @@ world: SARWorld = SARWorld(
     seed=None,
 )
 
+
+def set_world(new_world: SARWorld) -> None:
+    """
+    Replace the module-level world used by all MCP tool modules.
+
+    Call this before starting a new mission so that MCP tools operate
+    on the freshly created SARWorld instance rather than the default
+    singleton.  This is required when using RealMCPClient, because
+    MCP tools read from ``mcp_server.context.world`` directly.
+    """
+    global world
+    world = new_world
+
 # ---------------------------------------------------------------------------
 # FastMCP app
 # ---------------------------------------------------------------------------

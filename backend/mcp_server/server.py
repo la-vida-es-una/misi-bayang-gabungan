@@ -14,10 +14,13 @@ Usage (SSE transport — for browser / HTTP clients):
 from __future__ import annotations
 
 import argparse
+import logging
 
 from fastmcp import FastMCP
 
 from simulation import SARWorld
+from config.settings import get_settings
+from logging_setup import configure_logging, enable_function_call_tracing
 
 # ---------------------------------------------------------------------------
 # Shared simulation and MCP instances
@@ -39,6 +42,11 @@ import mcp_server.resources.mission_state  # noqa: E402, F401
 # CLI entry-point
 # ---------------------------------------------------------------------------
 def main() -> None:
+    settings = get_settings()
+    configure_logging(settings.LOG_LEVEL)
+    enable_function_call_tracing(settings.TRACE_FUNCTION_CALLS)
+    logger = logging.getLogger(__name__)
+
     parser = argparse.ArgumentParser(description="Misi Bayang MCP server")
     parser.add_argument(
         "--transport",
@@ -58,6 +66,14 @@ def main() -> None:
         help="SSE port (default: 8765)",
     )
     args = parser.parse_args()
+    logger.info(
+        "Starting MCP server | transport=%s | host=%s | port=%s | LOG_LEVEL=%s | TRACE_FUNCTION_CALLS=%s",
+        args.transport,
+        args.host,
+        args.port,
+        settings.LOG_LEVEL,
+        settings.TRACE_FUNCTION_CALLS,
+    )
 
     if args.transport == "sse":
         mcp.run(transport="sse", host=args.host, port=args.port)

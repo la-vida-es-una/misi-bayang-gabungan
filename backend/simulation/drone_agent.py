@@ -1,7 +1,11 @@
 from __future__ import annotations
 import math
 from enum import Enum
+from typing import TYPE_CHECKING
 from mesa import Agent
+
+if TYPE_CHECKING:
+    from .world import SARWorld
 
 from simulation.survivor import SurvivorAgent, SurvivorState
 
@@ -12,7 +16,7 @@ class DroneState(str, Enum):
     RETURN = "return"
 
 
-class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
+class DroneAgent(Agent):
     """
     Autonomous rescue drone with a three-state FSM.
 
@@ -71,7 +75,23 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
 
         self.target_survivor = None
         self._goal: tuple[int, int] | None = None
+        self._llm_waypoint: tuple[int, int] | None = None
         self._last_step_log: dict = {}
+
+    # ------------------------------------------------------------------
+    # LLM command interface
+    # ------------------------------------------------------------------
+    def set_llm_waypoint(self, x: int, y: int) -> None:
+        """Accept a strategic waypoint from the LLM orchestrator.
+        The drone FSM will navigate there at its configured speed."""
+        self._llm_waypoint = (x, y)
+        self._goal = (x, y)
+
+    def command_return_to_base(self) -> None:
+        """LLM commands this drone to return to base.
+        Sets state to RETURN so the FSM flies it back at normal speed."""
+        self.state = DroneState.RETURN
+        self._llm_waypoint = None
 
     # ------------------------------------------------------------------
     # Mesa step
@@ -155,15 +175,11 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
 
         # Battery
         drain = round(prev_battery - self.battery, 2)
-        reasoning.append(
-            f"Battery drained {drain}% -> {round(self.battery, 1)}%"
-        )
+        reasoning.append(f"Battery drained {drain}% -> {round(self.battery, 1)}%")
 
         # Sensing
         if new_detections > 0:
-            reasoning.append(
-                f"Thermal scan detected {new_detections} new survivor(s)"
-            )
+            reasoning.append(f"Thermal scan detected {new_detections} new survivor(s)")
         if new_edges > 0:
             reasoning.append(f"Sampled {new_edges} new obstacle edge(s)")
 
@@ -192,18 +208,26 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
                 )
             elif prev_state == DroneState.CONVERGE and self.state == DroneState.RETURN:
                 if self.battery <= self.low_battery:
-                    reasoning.append("Low battery during convergence — returning to base")
+                    reasoning.append(
+                        "Low battery during convergence — returning to base"
+                    )
                 else:
-                    reasoning.append("Survivor rescued — returning to base for recharge")
+                    reasoning.append(
+                        "Survivor rescued — returning to base for recharge"
+                    )
             elif prev_state == DroneState.CONVERGE and self.state == DroneState.EXPLORE:
                 reasoning.append("Target already rescued — resuming exploration")
             elif prev_state == DroneState.RETURN and self.state == DroneState.EXPLORE:
-                reasoning.append("Arrived at base — recharged to 100% — resuming exploration")
+                reasoning.append(
+                    "Arrived at base — recharged to 100% — resuming exploration"
+                )
         else:
             # Same state reasoning
             if self.state == DroneState.EXPLORE:
                 if self._goal:
-                    reasoning.append(f"Exploring toward goal ({self._goal[0]}, {self._goal[1]})")
+                    reasoning.append(
+                        f"Exploring toward goal ({self._goal[0]}, {self._goal[1]})"
+                    )
                 else:
                     reasoning.append("Exploring — selecting new goal")
             elif self.state == DroneState.CONVERGE:
@@ -225,6 +249,12 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
         else:
             reasoning.append("No movement this tick (blocked or at destination)")
 
+        # LLM waypoint
+        if self._llm_waypoint:
+            reasoning.append(
+                f"LLM waypoint active: ({self._llm_waypoint[0]}, {self._llm_waypoint[1]})"
+            )
+
         return log
 
     # ------------------------------------------------------------------
@@ -233,6 +263,7 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
     def _step_explore(self, pos: tuple[int, int]) -> None:
         if self.battery <= self.low_battery:
             self.state = DroneState.RETURN
+            self._llm_waypoint = None
             return
 
         unrescued = [s for s in self.known_survivors if s.state.value == "found"]
@@ -242,9 +273,17 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
                 key=lambda s: math.hypot(*self._vec_to(s._pos(), pos)),
             )
             self.state = DroneState.CONVERGE
+            self._llm_waypoint = None
             return
 
-        if not self._goal or pos == self._goal:
+        # LLM waypoint takes priority over self-selected exploration goal
+        if self._llm_waypoint:
+            if pos == self._llm_waypoint:
+                self._llm_waypoint = None
+                self._goal = self._pick_explore_goal(pos)
+            else:
+                self._goal = self._llm_waypoint
+        elif not self._goal or pos == self._goal:
             self._goal = self._pick_explore_goal(pos)
 
         self._move_toward(self._goal)
@@ -289,10 +328,13 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
     def _sense(self, pos: tuple[int, int]) -> None:
         x, y = pos
         # detect survivors
-        for agent in self.model.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self.model.agents:
             from .survivor import SurvivorAgent
 
-            if isinstance(agent, SurvivorAgent) and agent.state != SurvivorState.RESCUED:
+            if (
+                isinstance(agent, SurvivorAgent)
+                and agent.state != SurvivorState.RESCUED
+            ):
                 ax, ay = agent._pos()
                 if math.hypot(ax - x, ay - y) <= self.vision_radius:
                     if agent.state == SurvivorState.UNSEEN:
@@ -301,7 +343,7 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
                         self.known_survivors.append(agent)
 
         # sample obstacle edges
-        for agent in self.model.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self.model.agents:
             from .obstacle import ObstacleAgent
 
             if isinstance(agent, ObstacleAgent):
@@ -316,7 +358,7 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
         x, y = pos
         from .survivor import SurvivorAgent
 
-        for agent in self.model.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self.model.agents:
             if not isinstance(agent, DroneAgent) or agent is self:
                 continue
             ox, oy = agent._pos()
@@ -370,7 +412,7 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
             unvisited_bonus = 0 if (gx, gy) in self.visited_cells else 150
             spread = sum(
                 math.hypot(gx - a._pos()[0], gy - a._pos()[1])
-                for a in self.model.agents  # pyright: ignore[reportAttributeAccessIssue]
+                for a in self.model.agents
                 if isinstance(a, DroneAgent) and a is not self
             )
             score = unvisited_bonus + spread * 0.3 + self.random.uniform(0, 25)
@@ -410,6 +452,7 @@ class DroneAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
             "target_survivor": (
                 self.target_survivor.unique_id if self.target_survivor else None
             ),
+            "llm_waypoint": list(self._llm_waypoint) if self._llm_waypoint else None,
         }
 
 

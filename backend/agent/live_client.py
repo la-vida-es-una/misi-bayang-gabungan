@@ -2,14 +2,14 @@
 LiveMCPClient — bridges MCPClientProtocol to a live SARWorld instance.
 
 Translates string drone IDs ("drone_6") to Mesa integer IDs (6),
-simulates battery drain on moves/scans, tracks visited cells for
-coverage, and auto-rescues survivors found at the drone's position.
+tracks visited cells for coverage, and auto-rescues survivors found
+at the drone's position. Movement is waypoint-based — drones navigate
+via their FSM at configured speed instead of teleporting.
 """
 
 from __future__ import annotations
 
 import logging
-import math
 from typing import TYPE_CHECKING
 
 from .interfaces import DroneStatus, GridMap, MoveResult, ScanResult
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-BATTERY_DRAIN_MOVE = 3
 BATTERY_DRAIN_SCAN = 1
 
 
@@ -39,8 +38,18 @@ class LiveMCPClient:
 
     @staticmethod
     def _to_int(drone_id: str) -> int:
-        """'drone_6' -> 6"""
-        return int(drone_id.split("_")[1])
+        """'drone_6' -> 6.  Also accepts bare integers ('6')."""
+        if "_" in drone_id:
+            parts = drone_id.split("_")
+            if len(parts) >= 2 and parts[1]:
+                return int(parts[1])
+        # Fallback: try parsing the whole string as an integer
+        try:
+            return int(drone_id)
+        except ValueError:
+            raise ValueError(
+                f"Cannot parse drone_id {drone_id!r}: expected 'drone_<int>' or '<int>'"
+            )
 
     @staticmethod
     def _to_str(drone_id: int) -> str:
@@ -73,19 +82,15 @@ class LiveMCPClient:
         if drone is None:
             return MoveResult(success=False, drone_id=drone_id, x=x, y=y)
 
-        # Drain battery
-        drone.battery = max(0.0, drone.battery - BATTERY_DRAIN_MOVE)
         if drone.battery <= 0:
             return MoveResult(
                 success=False, drone_id=drone_id, x=drone._pos()[0], y=drone._pos()[1]
             )
 
-        result = self._world.move_drone_to(did, x, y)
+        # Set waypoint instead of teleporting — drone FSM navigates there at speed
+        result = self._world.set_drone_waypoint(did, x, y)
         if "error" in result:
             return MoveResult(success=False, drone_id=drone_id, x=x, y=y)
-
-        # Track visited cell for coverage
-        drone.visited_cells.add((x, y))
 
         return MoveResult(success=True, drone_id=drone_id, x=x, y=y)
 
@@ -114,9 +119,7 @@ class LiveMCPClient:
             if sx == dx and sy == dy:
                 self._auto_rescue(did, sx, sy)
 
-            return ScanResult(
-                survivor_detected=True, confidence=confidence, x=sx, y=sy
-            )
+            return ScanResult(survivor_detected=True, confidence=confidence, x=sx, y=sy)
 
         return ScanResult(survivor_detected=False, confidence=0.0, x=dx, y=dy)
 
@@ -126,27 +129,22 @@ class LiveMCPClient:
         if drone is None:
             return {"success": False, "drone_id": drone_id}
 
-        bx, by = self._world.base_pos
-        self._world.move_drone_to(did, bx, by)
-        drone.battery = 100.0
-        from simulation.drone_agent import DroneState
-
-        drone.state = DroneState.EXPLORE
-        drone.known_survivors = []
-        drone.known_edges = set()
-        drone._goal = None
+        # Trigger FSM RETURN state — drone flies back at normal speed
+        result = self._world.command_drone_return(did)
+        if "error" in result:
+            return {"success": False, "drone_id": drone_id}
 
         return {
             "success": True,
             "drone_id": drone_id,
-            "battery": 100,
-            "state": "charging",
+            "battery": int(drone.battery),
+            "state": "returning",
         }
 
     async def get_grid_map(self) -> GridMap:
         # Aggregate visited cells from all drones
         scanned: set[tuple[int, int]] = set()
-        for agent in self._world.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self._world.agents:
             from simulation.drone_agent import DroneAgent
 
             if isinstance(agent, DroneAgent):
@@ -154,7 +152,7 @@ class LiveMCPClient:
 
         # Collect found survivors
         survivors: list[list[int]] = []
-        for agent in self._world.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self._world.agents:
             from simulation.survivor import SurvivorAgent
 
             if isinstance(agent, SurvivorAgent) and agent.state.value != "unseen":
@@ -176,7 +174,7 @@ class LiveMCPClient:
         """Mark a survivor as rescued if found at exact drone position."""
         from simulation.survivor import SurvivorAgent
 
-        for agent in self._world.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self._world.agents:
             if isinstance(agent, SurvivorAgent):
                 ax, ay = agent._pos()
                 if ax == sx and ay == sy and agent.state.value == "found":

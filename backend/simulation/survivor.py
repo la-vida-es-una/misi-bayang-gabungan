@@ -1,5 +1,10 @@
+from __future__ import annotations
 from enum import Enum
-from mesa import Agent  # pyright: ignore[reportMissingTypeStubs]
+from typing import TYPE_CHECKING
+from mesa import Agent
+
+if TYPE_CHECKING:
+    from .world import SARWorld
 
 
 class SurvivorState(str, Enum):
@@ -8,7 +13,7 @@ class SurvivorState(str, Enum):
     RESCUED = "rescued"
 
 
-class SurvivorAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
+class SurvivorAgent(Agent):
     """
     Stationary agent representing a disaster survivor.
 

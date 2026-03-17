@@ -35,39 +35,40 @@ class Settings(BaseSettings):
 
     # ── Logging ─────────────────────────────────────────────────────
     LOG_DIR: str = "logs"
+    LOG_LEVEL: str = "INFO"
+    TRACE_FUNCTION_CALLS: bool = False
 
     # ── Generation parameters ───────────────────────────────────────
     TEMPERATURE: float = 0.2
     MAX_TOKENS: int = 1024
-    NUM_CTX: int = 2048
+    NUM_CTX: int = 8192
 
     def get_llm(self):
         """
         Return a LangChain chat model instance.
 
         * USE_LOCAL_LLM=False → ChatOpenAI pointed at MODEL_BASE_URL (OpenRouter)
-        * USE_LOCAL_LLM=True  → ChatOllama with model=MODEL_NAME (edge / prod)
+        * USE_LOCAL_LLM=True  → ChatOpenAI pointed at MODEL_BASE_URL (ramalama/OpenAI-compat)
+
+        ramalama serves an OpenAI-compatible REST API (/v1/chat/completions),
+        NOT the Ollama wire protocol — so both paths use ChatOpenAI.
 
         This is the **ONLY** place LLM is instantiated in the entire codebase.
         """
-        if self.USE_LOCAL_LLM:
-            from langchain_ollama import ChatOllama
-
-            return ChatOllama(
-                model=self.MODEL_NAME,
-                base_url=self.MODEL_BASE_URL,
-                temperature=self.TEMPERATURE,
-                num_ctx=self.NUM_CTX,
-            )
-
         from langchain_openai import ChatOpenAI
+
+        api_key = "local" if self.USE_LOCAL_LLM else self.MODEL_KEY
+        extra: dict = {}
+        if self.USE_LOCAL_LLM:
+            extra["extra_body"] = {"num_ctx": self.NUM_CTX}
 
         return ChatOpenAI(
             model=self.MODEL_NAME,
-            api_key=self.MODEL_KEY,
+            api_key=api_key,
             base_url=self.MODEL_BASE_URL,
             temperature=self.TEMPERATURE,
-            max_tokens=self.MAX_TOKENS,
+            max_tokens=self.MAX_TOKENS,  # pyright: ignore[reportCallIssue]
+            **extra,
         )
 
 

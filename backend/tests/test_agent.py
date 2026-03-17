@@ -383,13 +383,15 @@ class TestOrchestrator:
                 agent = create_agent(mcp_client=mock_mcp)
                 assert isinstance(agent, MissionOrchestrator)
 
-    @pytest.mark.asyncio
-    async def test_battery_guardian_recalls_low_drone(
+    def test_no_battery_guardian(
         self, mock_mcp: MockMCPClient, mock_settings: Settings
     ) -> None:
-        """Battery guardian should recall drones below threshold."""
-        mock_mcp.inject_low_battery("drone_1")
+        """
+        Battery guardian must not exist on the orchestrator.
 
+        All drone recall decisions must go through the LLM via MCP tool calls,
+        not through an autonomous Python method that bypasses the protocol.
+        """
         with patch("agent.orchestrator.create_react_agent") as mock_react:
             mock_react.return_value = MagicMock()
             orchestrator = MissionOrchestrator(
@@ -397,23 +399,9 @@ class TestOrchestrator:
                 settings=mock_settings,
             )
 
-        recalled = await orchestrator._battery_guardian(step=1)
-        assert "drone_1" in recalled
-
-    @pytest.mark.asyncio
-    async def test_battery_guardian_no_false_recalls(
-        self, mock_mcp: MockMCPClient, mock_settings: Settings
-    ) -> None:
-        """No drone should be recalled if all batteries are above threshold."""
-        with patch("agent.orchestrator.create_react_agent") as mock_react:
-            mock_react.return_value = MagicMock()
-            orchestrator = MissionOrchestrator(
-                mcp_client=mock_mcp,
-                settings=mock_settings,
-            )
-
-        recalled = await orchestrator._battery_guardian(step=1)
-        assert recalled == []
+        assert not hasattr(orchestrator, "_battery_guardian"), (
+            "_battery_guardian must be removed — battery management belongs to the LLM via MCP"
+        )
 
     @pytest.mark.asyncio
     async def test_run_mission_completes(

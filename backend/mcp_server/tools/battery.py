@@ -10,11 +10,11 @@ import mcp_server.context as context
 @context.mcp.tool()
 def return_to_base(drone_id: int) -> dict:
     """
-    Immediately recall a drone to the charging base and recharge it.
+    Command a drone to return to the charging base.
 
-    The drone is teleported to ``world.base_pos``.  Its battery is reset to
-    100 and its internal knowledge (known survivors, goals) is cleared, ready
-    for the next deployment.
+    The drone's FSM state is set to RETURN and it will fly back at its
+    configured speed over subsequent simulation ticks. Battery is recharged
+    automatically when the drone arrives at base.
 
     Parameters
     ----------
@@ -24,31 +24,10 @@ def return_to_base(drone_id: int) -> dict:
     Returns
     -------
     dict
-        ``{"success": bool, "drone_id": int, "x": int, "y": int,
-           "battery": float}``
-        or ``{"error": "..."}`` if the drone does not exist.
+        Updated drone snapshot, or ``{"error": "..."}`` if the drone
+        does not exist.
     """
-    drone = context.world.get_drone(drone_id)
-    if drone is None:
-        return {"error": f"drone {drone_id} not found"}
-
-    bx, by = context.world.base_pos
-    context.world.grid.move_agent(drone, (bx, by))
-    drone.battery = 100.0
-    drone.known_survivors = []
-    drone.known_edges = set()
-    drone._goal = None  # type: ignore[attr-defined]
-
-    from simulation import DroneState
-    drone.state = DroneState.EXPLORE
-
-    return {
-        "success": True,
-        "drone_id": drone_id,
-        "x": bx,
-        "y": by,
-        "battery": 100.0,
-    }
+    return context.world.command_drone_return(drone_id)
 
 
 @context.mcp.tool()

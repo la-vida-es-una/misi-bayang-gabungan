@@ -90,10 +90,7 @@ class MissionLogger:
         """Log an LLM reasoning step (CYAN)."""
         entry = ReasoningEntry(step=step, text=text)
         self._reasoning.append(entry)
-        print(
-            f"{Fore.CYAN}[STEP {step:>3} · REASONING]{Style.RESET_ALL} "
-            f"{text[:200]}"
-        )
+        print(f"{Fore.CYAN}[STEP {step:>3} · REASONING]{Style.RESET_ALL} {text[:200]}")
 
     def log_tool_call(
         self,
@@ -223,10 +220,7 @@ class MissionLogger:
 
         txt_path.write_text("\n".join(lines), encoding="utf-8")
 
-        print(
-            f"{Fore.GREEN}[LOGGER]{Style.RESET_ALL} "
-            f"Saved → {json_path} + {txt_path}"
-        )
+        print(f"{Fore.GREEN}[LOGGER]{Style.RESET_ALL} Saved → {json_path} + {txt_path}")
         return json_path, txt_path
 
     # ── internal helpers ────────────────────────────────────────────

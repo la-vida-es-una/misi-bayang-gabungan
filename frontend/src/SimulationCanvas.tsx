@@ -8,6 +8,7 @@
 import { useEffect, useRef } from "react";
 import { useMissionState } from "./store";
 import type { TickEvent } from "./types";
+import { logDebug, logInfo } from "./logger";
 
 // ── Constants ──────────────────────────────────────────────────────────
 const DRONE_COLORS = ["#4af", "#f4a", "#4fa", "#fa4", "#a4f", "#ff8", "#8ff"];
@@ -234,6 +235,26 @@ function drawSurvivors(
   }
 }
 
+// ── Interpolation helper ──────────────────────────────────────────────
+type DronePositions = Record<number, { nx: number; ny: number }>;
+
+function lerpDronePos(
+  droneId: number,
+  rawNx: number,
+  rawNy: number,
+  prev: DronePositions,
+  t: number,
+): { nx: number; ny: number } {
+  const p = prev[droneId];
+  if (!p) return { nx: rawNx, ny: rawNy };
+  // Ease-out quadratic for natural deceleration
+  const eased = 1 - Math.pow(1 - t, 2);
+  return {
+    nx: p.nx + (rawNx - p.nx) * eased,
+    ny: p.ny + (rawNy - p.ny) * eased,
+  };
+}
+
 function drawDrones(
   ctx: CanvasRenderingContext2D,
   state: TickEvent,
@@ -241,6 +262,8 @@ function drawDrones(
   cw: number,
   ch: number,
   cam: { x: number; y: number; scale: number },
+  prevPositions: DronePositions,
+  interpT: number,
 ) {
   const gw = state.grid.width,
     gh = state.grid.height;
@@ -248,7 +271,11 @@ function drawDrones(
   state.drones.forEach((drone, i) => {
     const color = DRONE_COLORS[i % DRONE_COLORS.length];
     const name = DRONE_NAMES[i % DRONE_NAMES.length];
-    const { nx, ny } = gridToNorm(drone.x, drone.y, gw, gh);
+    const rawNorm = gridToNorm(drone.x, drone.y, gw, gh);
+    const { nx, ny } = lerpDronePos(
+      drone.id, rawNorm.nx, rawNorm.ny,
+      prevPositions, interpT,
+    );
     const p = worldToScreen(nx, ny, cw, ch, cam);
 
     // Heading from trail
@@ -308,6 +335,7 @@ function drawDrones(
 // ── React Component ────────────────────────────────────────────────────
 
 export function SimulationCanvas() {
+  logDebug("SimulationCanvas", "Render start");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { liveState, droneTrails } = useMissionState();
 
@@ -317,23 +345,56 @@ export function SimulationCanvas() {
   stateRef.current = liveState;
   trailsRef.current = droneTrails;
 
+  // Interpolation refs: track previous/current normalized positions
+  const prevDronesRef = useRef<DronePositions>({});
+  const currDronesRef = useRef<DronePositions>({});
+  const lastTickTimeRef = useRef(Date.now());
+  const tickIntervalMs = 500; // matches backend tick_interval default
+
+  // Update interpolation anchors when a new tick arrives
   useEffect(() => {
+    if (!liveState) return;
+    const gw = liveState.grid.width;
+    const gh = liveState.grid.height;
+
+    // Shift current -> previous
+    prevDronesRef.current = { ...currDronesRef.current };
+
+    // Record new current positions
+    const newCurr: DronePositions = {};
+    for (const d of liveState.drones) {
+      newCurr[d.id] = { nx: d.x / (gw - 1), ny: 1 - d.y / (gh - 1) };
+    }
+    currDronesRef.current = newCurr;
+
+    // Reset interpolation timer
+    lastTickTimeRef.current = Date.now();
+  }, [liveState?.tick]);
+
+  useEffect(() => {
+    logInfo("SimulationCanvas", "Canvas effect mounted");
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
     const cam = { x: 0, y: 0, scale: 1 };
     let raf: number;
+    let frameCount = 0;
 
     function resize() {
       const r = canvas!.getBoundingClientRect();
       canvas!.width = r.width;
       canvas!.height = r.height;
+      logDebug("SimulationCanvas.resize", "Canvas resized", {
+        width: canvas!.width,
+        height: canvas!.height,
+      });
     }
     resize();
     window.addEventListener("resize", resize);
 
     function frame() {
       raf = requestAnimationFrame(frame);
+      frameCount += 1;
       const cw = canvas!.width;
       const ch = canvas!.height;
       cam.x += (0 - cam.x) * 0.05;
@@ -344,12 +405,23 @@ export function SimulationCanvas() {
       const state = stateRef.current;
       const trails = trailsRef.current;
       if (state) {
+        // Compute interpolation progress (0..1) between ticks
+        const elapsed = Date.now() - lastTickTimeRef.current;
+        const interpT = Math.min(1, elapsed / tickIntervalMs);
+
         drawCommMesh(ctx, state, cw, ch, cam);
         drawObstacles(ctx, state, cw, ch, cam);
         drawTrails(ctx, state, trails, cw, ch, cam);
         drawBase(ctx, state, cw, ch, cam);
         drawSurvivors(ctx, state, cw, ch, cam);
-        drawDrones(ctx, state, trails, cw, ch, cam);
+        drawDrones(ctx, state, trails, cw, ch, cam, prevDronesRef.current, interpT);
+      }
+
+      if (frameCount % 120 === 0) {
+        logDebug("SimulationCanvas.frame", "Render loop heartbeat", {
+          frameCount,
+          hasState: Boolean(state),
+        });
       }
     }
     raf = requestAnimationFrame(frame);
@@ -357,8 +429,20 @@ export function SimulationCanvas() {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
+      logInfo("SimulationCanvas", "Canvas effect cleanup");
     };
   }, []);
+
+  useEffect(() => {
+    if (!liveState) {
+      return;
+    }
+    logInfo("SimulationCanvas", "New tick rendered", {
+      tick: liveState.tick,
+      drones: liveState.drones.length,
+      survivors: liveState.survivors.length,
+    });
+  }, [liveState?.tick, liveState]);
 
   return <canvas ref={canvasRef} id="c3d" />;
 }

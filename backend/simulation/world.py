@@ -17,7 +17,7 @@ class _ScheduleCompat:
 
     @property
     def agents(self) -> list:
-        all_agents = list(self._model.agents)  # pyright: ignore[reportAttributeAccessIssue]
+        all_agents = list(self._model.agents)
         return sorted(
             all_agents,
             key=lambda agent: (
@@ -31,7 +31,7 @@ class _ScheduleCompat:
         return self._model.steps
 
 
-class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
+class SARWorld(Model):
     """
     Mesa Model for the Stormwatch SAR simulation.
 
@@ -116,7 +116,7 @@ class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
     # ------------------------------------------------------------------
     def step(self) -> None:
         # Mesa 2.x: shuffle_do replaces RandomActivation.step()
-        self.agents.shuffle_do("step")  # pyright: ignore[reportAttributeAccessIssue]
+        self.agents.shuffle_do("step")
 
     # ------------------------------------------------------------------
     # World state snapshot (consumed by WebSocket broadcaster)
@@ -126,7 +126,7 @@ class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
         survivors = []
         obstacles = []
 
-        for agent in self.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self.agents:
             if isinstance(agent, DroneAgent):
                 drones.append(agent.to_dict())
             elif isinstance(agent, SurvivorAgent):
@@ -136,7 +136,7 @@ class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
 
         total_cells = self.width * self.height - len(self._obstacle_cells)
         visited: set[tuple[int, int]] = set()
-        for agent in self.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self.agents:
             if isinstance(agent, DroneAgent):
                 visited.update(agent.visited_cells)
         coverage_pct = round(len(visited) / max(total_cells, 1) * 100, 1)
@@ -151,7 +151,7 @@ class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
             "grid": {"width": self.width, "height": self.height},
             "mission_complete": all(
                 s.state.value == "rescued"
-                for s in self.agents  # pyright: ignore[reportAttributeAccessIssue]
+                for s in self.agents
                 if isinstance(s, SurvivorAgent)
             ),
         }
@@ -160,7 +160,7 @@ class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
     # MCP tool helpers (called by mcp_server/tools/)
     # ------------------------------------------------------------------
     def get_drone(self, drone_id: int) -> DroneAgent | None:
-        for agent in self.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self.agents:
             if isinstance(agent, DroneAgent) and agent.unique_id == drone_id:
                 return agent
         return None
@@ -169,13 +169,13 @@ class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
         """Return serialised state of all drones with battery > 0."""
         return [
             agent.to_dict()
-            for agent in self.agents  # pyright: ignore[reportAttributeAccessIssue]
+            for agent in self.agents
             if isinstance(agent, DroneAgent) and agent.battery > 0
         ]
 
     def move_drone_to(self, drone_id: int, x: int, y: int) -> dict:
         """
-        Directly move a drone to (x, y) — used by the MCP move_to tool.
+        Directly move a drone to (x, y) — internal method for initial placement.
         Returns updated drone state.
         """
         drone = self.get_drone(drone_id)
@@ -188,6 +188,30 @@ class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
         self.grid.move_agent(drone, (x, y))
         return drone.to_dict()
 
+    def set_drone_waypoint(self, drone_id: int, x: int, y: int) -> dict:
+        """Set a strategic waypoint for a drone. The drone's FSM will
+        navigate there at its configured speed over subsequent ticks."""
+        drone = self.get_drone(drone_id)
+        if drone is None:
+            return {"error": f"drone {drone_id} not found"}
+        if self.is_blocked(x, y):
+            return {"error": f"cell ({x},{y}) is blocked"}
+        x = max(0, min(self.width - 1, x))
+        y = max(0, min(self.height - 1, y))
+        drone.set_llm_waypoint(x, y)
+        result = drone.to_dict()
+        result["waypoint_set"] = True
+        result["target"] = [x, y]
+        return result
+
+    def command_drone_return(self, drone_id: int) -> dict:
+        """Command a drone to return to base via its FSM (no teleport)."""
+        drone = self.get_drone(drone_id)
+        if drone is None:
+            return {"error": f"drone {drone_id} not found"}
+        drone.command_return_to_base()
+        return drone.to_dict()
+
     def thermal_scan(self, drone_id: int) -> dict:
         """
         Return survivors visible within the drone's vision radius.
@@ -198,7 +222,7 @@ class SARWorld(Model):  # pyright: ignore[reportMissingTypeArgument]
             return {"error": f"drone {drone_id} not found"}
         dx, dy = drone._pos()
         results = []
-        for agent in self.agents:  # pyright: ignore[reportAttributeAccessIssue]
+        for agent in self.agents:
             if isinstance(agent, SurvivorAgent):
                 sx, sy = agent._pos()
                 if math.hypot(sx - dx, sy - dy) <= drone.vision_radius:

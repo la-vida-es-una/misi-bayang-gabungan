@@ -15,6 +15,7 @@ export interface DroneState {
   known_survivors: number[];
   known_edges: number;
   target_survivor: number | null;
+  llm_waypoint: [number, number] | null;
 }
 
 export interface SurvivorState {

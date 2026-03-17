@@ -1,9 +1,13 @@
 from __future__ import annotations
 import math
-from mesa import Agent  # pyright: ignore[reportMissingTypeStubs]
+from typing import TYPE_CHECKING
+from mesa import Agent
+
+if TYPE_CHECKING:
+    from .world import SARWorld
 
 
-class ObstacleAgent(Agent):  # pyright: ignore[reportMissingTypeArgument]
+class ObstacleAgent(Agent):
     """
     Static blocking geometry in the disaster zone.
 

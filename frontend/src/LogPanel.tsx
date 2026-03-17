@@ -6,6 +6,7 @@
 
 import { useEffect, useRef } from "react";
 import { useMissionState } from "./store";
+import { logDebug } from "./logger";
 
 const DRONE_NAMES = [
   "ALPHA",
@@ -18,6 +19,7 @@ const DRONE_NAMES = [
 ];
 
 function stateColor(s: string): string {
+  logDebug("LogPanel.stateColor", "Compute state color", { state: s });
   switch (s) {
     case "explore":
       return "#4fa";
@@ -35,16 +37,19 @@ function stateColor(s: string): string {
 }
 
 function droneName(droneId: number): string {
+  logDebug("LogPanel.droneName", "Resolve drone name", { droneId });
   if (droneId === -1) return "ARIA";
   return DRONE_NAMES[droneId % DRONE_NAMES.length];
 }
 
 function droneColor(droneId: number): string {
+  logDebug("LogPanel.droneColor", "Resolve drone color", { droneId });
   if (droneId === -1) return "#8af";
   return "#4af";
 }
 
 export function LogPanel() {
+  logDebug("LogPanel", "Render start");
   const { logs, selectedDroneId } = useMissionState();
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -55,6 +60,7 @@ export function LogPanel() {
 
   // Auto-scroll to bottom on new entries
   useEffect(() => {
+    logDebug("LogPanel", "Auto-scroll effect", { visibleEntries: filtered.length });
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [filtered.length]);
 

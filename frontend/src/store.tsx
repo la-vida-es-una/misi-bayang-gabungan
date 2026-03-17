@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { MissionState, WSEvent, TickEvent, LogEntry } from "./types";
+import { logDebug, logInfo } from "./logger";
 
 const MAX_TRAIL = 40;
 const MAX_EVENTS = 7;
@@ -40,6 +41,10 @@ type Action =
   | { type: "RESET" };
 
 function pushEvent(events: string[], text: string): string[] {
+  logDebug("store.pushEvent", "Pushing UI event", {
+    text,
+    currentCount: events.length,
+  });
   return [text, ...events.slice(0, MAX_EVENTS - 1)];
 }
 
@@ -47,6 +52,10 @@ function updateTrails(
   trails: Record<number, { nx: number; ny: number }[]>,
   tick: TickEvent,
 ): Record<number, { nx: number; ny: number }[]> {
+  logDebug("store.updateTrails", "Updating drone trails", {
+    tick: tick.tick,
+    drones: tick.drones.length,
+  });
   const gw = tick.grid.width;
   const gh = tick.grid.height;
   const next = { ...trails };
@@ -62,8 +71,12 @@ function updateTrails(
 // ── Reducer ─────────────────────────────────────────────────────────
 
 function missionReducer(state: MissionState, action: Action): MissionState {
+  logDebug("store.missionReducer", "Reducer action", { type: action.type });
   switch (action.type) {
     case "SET_WS_STATUS":
+      logInfo("store.missionReducer", "Websocket status updated", {
+        status: action.status,
+      });
       return { ...state, wsStatus: action.status };
 
     case "PUSH_EVENT":
@@ -77,8 +90,13 @@ function missionReducer(state: MissionState, action: Action): MissionState {
 
     case "WS_EVENT": {
       const ev = action.event;
+      logDebug("store.missionReducer", "WS event received", { eventType: ev.type });
       switch (ev.type) {
         case "tick":
+          logInfo("store.missionReducer", "Tick state applied", {
+            tick: ev.tick,
+            coverage: ev.coverage_pct,
+          });
           return {
             ...state,
             tick: ev.tick,
@@ -89,6 +107,10 @@ function missionReducer(state: MissionState, action: Action): MissionState {
           };
 
         case "sim_log": {
+          logDebug("store.missionReducer", "Simulation log event", {
+            tick: ev.tick,
+            entries: ev.drone_logs.length,
+          });
           const newLogs: LogEntry[] = ev.drone_logs.map((dl) => ({
             tick: ev.tick,
             drone_id: dl.drone_id,
@@ -105,6 +127,9 @@ function missionReducer(state: MissionState, action: Action): MissionState {
         }
 
         case "mission_status": {
+          logInfo("store.missionReducer", "Mission status event", {
+            status: ev.status,
+          });
           if (ev.status === "started") {
             return {
               ...state,
@@ -133,6 +158,7 @@ function missionReducer(state: MissionState, action: Action): MissionState {
         }
 
         case "mission_complete":
+          logInfo("store.missionReducer", "Mission complete event", ev.summary);
           return {
             ...state,
             running: false,
@@ -153,6 +179,11 @@ function missionReducer(state: MissionState, action: Action): MissionState {
           };
 
         case "survivor_found":
+          logInfo("store.missionReducer", "Survivor found event", {
+            x: ev.x,
+            y: ev.y,
+            confidence: ev.confidence,
+          });
           return {
             ...state,
             events: pushEvent(
@@ -162,6 +193,10 @@ function missionReducer(state: MissionState, action: Action): MissionState {
           };
 
         case "reasoning": {
+          logDebug("store.missionReducer", "Reasoning event", {
+            tick: state.tick,
+            textLen: ev.text.length,
+          });
           const reasoningLog: LogEntry = {
             tick: state.tick,
             drone_id: -1,
@@ -182,6 +217,9 @@ function missionReducer(state: MissionState, action: Action): MissionState {
         }
 
         case "tool_call": {
+          logInfo("store.missionReducer", "Tool call event", {
+            tool: ev.tool_name,
+          });
           const toolLog: LogEntry = {
             tick: state.tick,
             drone_id: -1,
@@ -220,6 +258,7 @@ const MissionStateCtx = createContext<MissionState>(initialState);
 const MissionDispatchCtx = createContext<Dispatch<Action>>(() => {});
 
 export function MissionProvider({ children }: { children: ReactNode }) {
+  logDebug("store.MissionProvider", "MissionProvider render");
   const [state, dispatch] = useReducer(missionReducer, initialState);
   return (
     <MissionStateCtx.Provider value={state}>
@@ -231,9 +270,11 @@ export function MissionProvider({ children }: { children: ReactNode }) {
 }
 
 export function useMissionState(): MissionState {
+  logDebug("store.useMissionState", "State hook accessed");
   return useContext(MissionStateCtx);
 }
 
 export function useMissionDispatch(): Dispatch<Action> {
+  logDebug("store.useMissionDispatch", "Dispatch hook accessed");
   return useContext(MissionDispatchCtx);
 }

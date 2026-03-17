@@ -8,7 +8,6 @@ forwarding them to the WebSocketObserver for real-time frontend display.
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any, TYPE_CHECKING
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -16,8 +15,6 @@ from langchain_core.outputs import LLMResult
 
 if TYPE_CHECKING:
     from .interfaces import AgentObserverProtocol
-
-logger = logging.getLogger(__name__)
 
 
 class ObserverCallbackHandler(BaseCallbackHandler):
