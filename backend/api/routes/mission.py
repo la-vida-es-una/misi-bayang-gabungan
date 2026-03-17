@@ -114,12 +114,16 @@ async def _state_broadcaster(
 # ── orchestrated mission ─────────────────────────────────────────────────────
 
 
-async def _orchestrated_mission(
+async def _run_orchestrator(
     world: SARWorld,
     manager,
-    tick_interval: float,
 ) -> None:
-    """Run the LLM-driven mission orchestrator + state broadcaster concurrently."""
+    """Run the LLM-driven mission orchestrator.
+
+    The simulation broadcaster runs independently; this task only manages
+    the LLM lifecycle.  When it finishes (normally or via cancellation) the
+    broadcaster and drones keep running.
+    """
     from api.state import app_state
     from agent.real_mcp_client import RealMCPClient
     from agent.orchestrator import MissionOrchestrator
@@ -129,11 +133,8 @@ async def _orchestrated_mission(
     import mcp_server.server  # noqa: F401 — registers all tool modules on context.mcp
 
     settings = get_settings()
-    logger.info("Orchestrated mission starting")
+    logger.info("Orchestrator starting")
 
-    # Inject the mission's SARWorld into the MCP server context so that
-    # all MCP tools (discovery, movement, sensors, battery) operate on
-    # this instance rather than the default module-level singleton.
     _mcp_ctx.set_world(world)
 
     real_client = RealMCPClient(_mcp_ctx.mcp)
@@ -145,15 +146,17 @@ async def _orchestrated_mission(
     )
     app_state.orchestrator = orchestrator
 
-    # Start state broadcaster as a concurrent task
-    broadcaster = asyncio.create_task(
-        _state_broadcaster(world, manager, tick_interval)
-    )
-
     try:
         await orchestrator.run_mission()
+        await manager.broadcast(
+            {
+                "type": "mission_status",
+                "status": "stopped",
+                "message": "LLM orchestrator finished",
+            }
+        )
     except asyncio.CancelledError:
-        logger.info("Orchestrated mission cancelled")
+        logger.info("Orchestrator cancelled")
         pass
     except Exception as exc:
         logger.exception("Orchestrator crashed: %s", exc)
@@ -164,42 +167,6 @@ async def _orchestrated_mission(
                 "message": f"LLM agent error: {type(exc).__name__}: {exc}",
             }
         )
-    finally:
-        logger.info("Orchestrated mission finalizing")
-        world.running = False
-        broadcaster.cancel()
-        try:
-            await broadcaster
-        except asyncio.CancelledError:
-            pass
-
-        # Broadcast final state
-        state = world.get_state()
-        await manager.broadcast({"type": "tick", **state})
-
-        if state["mission_complete"]:
-            rescued = sum(
-                1 for s in state["survivors"] if s["state"] == "rescued"
-            )
-            await manager.broadcast(
-                {
-                    "type": "mission_complete",
-                    "summary": {
-                        "tick": state["tick"],
-                        "coverage_pct": state["coverage_pct"],
-                        "survivors_rescued": rescued,
-                        "total_survivors": len(state["survivors"]),
-                    },
-                }
-            )
-        else:
-            await manager.broadcast(
-                {
-                    "type": "mission_status",
-                    "status": "stopped",
-                    "message": "Mission ended",
-                }
-            )
 
 
 # ── route handlers ───────────────────────────────────────────────────────────
@@ -224,6 +191,15 @@ async def start_mission(config: MissionConfig) -> dict:
         config.tick_interval,
         config.seed,
     )
+
+    # Cancel existing broadcaster (new world = new broadcaster)
+    if app_state.broadcaster_task and not app_state.broadcaster_task.done():
+        logger.info("Cancelling existing broadcaster before restart")
+        app_state.broadcaster_task.cancel()
+        try:
+            await app_state.broadcaster_task
+        except asyncio.CancelledError:
+            pass
 
     # Cancel any in-flight mission gracefully
     if app_state.mission_task and not app_state.mission_task.done():
@@ -250,10 +226,13 @@ async def start_mission(config: MissionConfig) -> dict:
     app_state.world = world
     app_state.agent_logs.clear()
 
-    app_state.mission_task = asyncio.create_task(
-        _orchestrated_mission(world, app_state.manager, config.tick_interval)
+    app_state.broadcaster_task = asyncio.create_task(
+        _state_broadcaster(world, app_state.manager, config.tick_interval)
     )
-    logger.info("Mission task created")
+    app_state.mission_task = asyncio.create_task(
+        _run_orchestrator(world, app_state.manager)
+    )
+    logger.info("Broadcaster and mission tasks created")
 
     await app_state.manager.broadcast(
         {
@@ -283,10 +262,6 @@ async def stop_mission() -> dict:
             await app_state.mission_task
         except asyncio.CancelledError:
             pass
-
-    if app_state.world:
-        logger.info("Setting world.running=False")
-        app_state.world.running = False
 
     await app_state.manager.broadcast(
         {

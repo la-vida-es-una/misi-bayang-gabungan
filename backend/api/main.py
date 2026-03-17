@@ -13,6 +13,7 @@ Then open http://localhost:8000 to see the live dashboard.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,8 +53,36 @@ async def lifespan(app: FastAPI):
         _settings.TRACE_FUNCTION_CALLS,
     )
     logger.info("MISI BAYANG API ready — dashboard at http://localhost:8000")
+
+    # Auto-start the simulation on boot so the canvas shows drones immediately
+    from api.routes.mission import MissionConfig, _state_broadcaster
+    from simulation.world import SARWorld
+
+    _default_config = MissionConfig()
+    _default_world = SARWorld(
+        n_drones=_default_config.n_drones,
+        n_survivors=_default_config.n_survivors,
+        width=_default_config.width,
+        height=_default_config.height,
+        n_obstacles=_default_config.n_obstacles,
+        vision_radius=_default_config.vision_radius,
+        comm_radius=_default_config.comm_radius,
+        battery_drain=_default_config.battery_drain,
+        low_battery=_default_config.low_battery,
+        speed=_default_config.speed,
+        seed=_default_config.seed,
+    )
+    app_state.world = _default_world
+    app_state.broadcaster_task = asyncio.create_task(
+        _state_broadcaster(_default_world, app_state.manager, _default_config.tick_interval)
+    )
+    logger.info("Default simulation broadcaster started on boot")
+
     yield
-    # Graceful shutdown: cancel any running simulation task
+
+    # Graceful shutdown: cancel broadcaster and any running mission task
+    if app_state.broadcaster_task and not app_state.broadcaster_task.done():
+        app_state.broadcaster_task.cancel()
     if app_state.mission_task and not app_state.mission_task.done():
         app_state.mission_task.cancel()
     logger.info("MISI BAYANG API shut down")
