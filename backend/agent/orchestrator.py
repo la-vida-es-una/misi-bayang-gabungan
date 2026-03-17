@@ -107,6 +107,8 @@ class MissionOrchestrator:
         async def list_active_drones() -> str:
             """List all active drones. Returns {"drones": ["drone_1", ...]}."""
             result = await mcp.list_active_drones()
+            result_dict = dict(result)
+            observer.on_tool_call("list_active_drones", {}, result_dict)
             return json.dumps(result)
 
         @langchain_tool
@@ -114,7 +116,9 @@ class MissionOrchestrator:
             """Get drone battery, position, state. Input: drone_id.
             Returns {"drone_id", "battery", "x", "y", "state"}."""
             result = await mcp.get_drone_status(drone_id)
-            return json.dumps(dict(result))
+            result_dict = dict(result)
+            observer.on_tool_call("get_drone_status", {"drone_id": drone_id}, result_dict)
+            return json.dumps(result_dict)
 
         @langchain_tool
         async def move_to(drone_id: str, x: int, y: int) -> str:
@@ -122,6 +126,7 @@ class MissionOrchestrator:
             speed; does NOT teleport. Returns {"success", "drone_id", "x", "y"}."""
             result = await mcp.move_to(drone_id, x, y)
             result_dict = dict(result)
+            observer.on_tool_call("move_to", {"drone_id": drone_id, "x": x, "y": y}, result_dict)
             if result_dict.get("success"):
                 planner.mark_scanned(x, y)
             return json.dumps(result_dict)
@@ -133,6 +138,7 @@ class MissionOrchestrator:
             If survivor_detected=true, call broadcast_alert."""
             result = await mcp.thermal_scan(drone_id)
             result_dict = dict(result)
+            observer.on_tool_call("thermal_scan", {"drone_id": drone_id}, result_dict)
 
             if result_dict.get("survivor_detected"):
                 orchestrator._survivors_found.append(result_dict)
@@ -154,22 +160,28 @@ class MissionOrchestrator:
         async def return_to_base(drone_id: str) -> str:
             """Send drone to recharge. Use when battery<25%. Input: drone_id."""
             result = await mcp.return_to_base(drone_id)
+            result_dict = dict(result)
+            observer.on_tool_call("return_to_base", {"drone_id": drone_id}, result_dict)
             planner.release_sector(drone_id)
             logger.log_battery_event(orchestrator._step, drone_id, 0, "recall")
-            return json.dumps(result)
+            return json.dumps(result_dict)
 
         @langchain_tool
         async def get_grid_map() -> str:
             """Get scanned cells and found survivors.
             Returns {"scanned": [[x,y],...], "survivors": [[x,y],...]}."""
             result = await mcp.get_grid_map()
-            return json.dumps(dict(result))
+            result_dict = dict(result)
+            observer.on_tool_call("get_grid_map", {}, result_dict)
+            return json.dumps(result_dict)
 
         @langchain_tool
         async def broadcast_alert(x: int, y: int, message: str) -> str:
             """Broadcast survivor alert. Input: x, y, message."""
             result = await mcp.broadcast_alert(x, y, message)
-            return json.dumps(result)
+            result_dict = dict(result)
+            observer.on_tool_call("broadcast_alert", {"x": x, "y": y, "message": message}, result_dict)
+            return json.dumps(result_dict)
 
         return [
             list_active_drones,
@@ -247,6 +259,7 @@ class MissionOrchestrator:
             self._step = 0
             self._logger.log_reasoning(0, f"Mission objective: {objective}")
             self._observer.on_step_start(0, {"objective": objective})
+            self._observer.on_reasoning(0, f"Mission objective: {objective}")
 
             from .callbacks import ObserverCallbackHandler
 
@@ -255,10 +268,9 @@ class MissionOrchestrator:
             for invocation in range(1, effective_max_steps + 1):
                 # ── check ground-truth coverage before invoking ────
                 if self._planner.all_sectors_scanned():
-                    self._logger.log_reasoning(
-                        self._step,
-                        "Mission complete: all sectors >= 95% coverage.",
-                    )
+                    msg = "Mission complete: all sectors >= 95% coverage."
+                    self._logger.log_reasoning(self._step, msg)
+                    self._observer.on_reasoning(self._step, msg)
                     break
 
                 # ── build message for this invocation ──────────────
@@ -275,6 +287,12 @@ class MissionOrchestrator:
                         ),
                     )
                     human_content = correction + context
+
+                # ── broadcast the input sent to the LLM ────────────
+                self._observer.on_step_start(invocation, {
+                    "invocation": invocation,
+                    "human_message": human_content,
+                })
 
                 # ── sync step counter before invocation ────────────
                 self._step = handler._step
@@ -293,29 +311,30 @@ class MissionOrchestrator:
 
                 # ── check ground-truth coverage after invocation ───
                 if self._planner.all_sectors_scanned():
-                    self._logger.log_reasoning(
-                        self._step,
-                        "Mission complete: all sectors >= 95% coverage.",
-                    )
+                    msg = "Mission complete: all sectors >= 95% coverage."
+                    self._logger.log_reasoning(self._step, msg)
+                    self._observer.on_reasoning(self._step, msg)
                     break
 
                 # ── log continuation ───────────────────────────────
                 report = self._planner.get_status_report()
-                self._logger.log_reasoning(
-                    self._step,
+                msg = (
                     f"Invocation {invocation} ended — "
                     f"coverage {report['overall_coverage']}%. "
-                    f"Re-invoking agent.",
+                    f"Re-invoking agent."
                 )
+                self._logger.log_reasoning(self._step, msg)
+                self._observer.on_reasoning(self._step, msg)
             else:
                 # for-loop exhausted without break — budget spent
                 report = self._planner.get_status_report()
-                self._logger.log_reasoning(
-                    self._step,
+                msg = (
                     f"Step budget exhausted ({effective_max_steps} "
                     f"invocations). "
-                    f"Final coverage: {report['overall_coverage']}%.",
+                    f"Final coverage: {report['overall_coverage']}%."
                 )
+                self._logger.log_reasoning(self._step, msg)
+                self._observer.on_reasoning(self._step, msg)
 
         except Exception as exc:
             self._logger.log_reasoning(

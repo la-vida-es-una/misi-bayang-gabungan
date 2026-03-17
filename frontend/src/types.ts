@@ -125,6 +125,19 @@ export type WSEvent =
   | ToolCallEvent
   | SimLogEvent;
 
+// ── Context panel message types ─────────────────────────────────────
+
+export interface ContextMessage {
+  id: number;
+  type: "input" | "reasoning" | "tool_call" | "tool_result";
+  text?: string;
+  context?: Record<string, unknown>;
+  tool_name?: string;
+  params?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  tick: number;
+}
+
 // ── Mission store state ─────────────────────────────────────────────
 
 export interface LogEntry {
@@ -149,4 +162,7 @@ export interface MissionState {
   droneTrails: Record<number, { nx: number; ny: number }[]>;
   logs: LogEntry[];
   selectedDroneId: number | null;
+  contextMessages: ContextMessage[];
+  systemPrompt: string;
+  mcpTools: Record<string, unknown>[];
 }

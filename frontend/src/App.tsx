@@ -9,7 +9,7 @@ import { useMissionState } from "./store";
 import { useWebSocket } from "./useWebSocket";
 import { SimulationCanvas } from "./SimulationCanvas";
 import { DronePanel } from "./DronePanel";
-import { LogPanel } from "./LogPanel";
+import { ContextPanel } from "./ContextPanel";
 import { logDebug, logError, logInfo } from "./logger";
 
 function apiBase(): string {
@@ -182,8 +182,8 @@ export function App() {
         </div>
       </div>
 
-      {/* Right panel: Chain of Thought logs */}
-      <LogPanel />
+      {/* Right panel: Context Panel */}
+      <ContextPanel />
     </div>
   );
 }

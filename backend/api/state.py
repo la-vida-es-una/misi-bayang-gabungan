@@ -27,6 +27,7 @@ class AppState:
         self.world: "SARWorld | None" = None
         self.manager: ConnectionManager = ConnectionManager()
         self.mission_task: asyncio.Task | None = None
+        self.broadcaster_task: asyncio.Task | None = None
         self.agent_logs: list[dict] = []
         self.orchestrator: "MissionOrchestrator | None" = None
 

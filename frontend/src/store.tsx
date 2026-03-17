@@ -9,12 +9,15 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react";
-import type { MissionState, WSEvent, TickEvent, LogEntry } from "./types";
+import type { MissionState, WSEvent, TickEvent, LogEntry, ContextMessage } from "./types";
 import { logDebug, logInfo } from "./logger";
 
 const MAX_TRAIL = 40;
 const MAX_EVENTS = 7;
 const MAX_LOGS = 200;
+const MAX_CONTEXT_MSGS = 200;
+
+let _nextContextId = 1;
 
 const initialState: MissionState = {
   wsStatus: "offline",
@@ -29,6 +32,9 @@ const initialState: MissionState = {
   droneTrails: {},
   logs: [],
   selectedDroneId: null,
+  contextMessages: [],
+  systemPrompt: "",
+  mcpTools: [],
 };
 
 // ── Actions ─────────────────────────────────────────────────────────
@@ -38,6 +44,8 @@ type Action =
   | { type: "WS_EVENT"; event: WSEvent }
   | { type: "PUSH_EVENT"; text: string }
   | { type: "SELECT_DRONE"; droneId: number | null }
+  | { type: "SET_SYSTEM_PROMPT"; prompt: string }
+  | { type: "SET_MCP_TOOLS"; tools: Record<string, unknown>[] }
   | { type: "RESET" };
 
 function pushEvent(events: string[], text: string): string[] {
@@ -85,6 +93,12 @@ function missionReducer(state: MissionState, action: Action): MissionState {
     case "SELECT_DRONE":
       return { ...state, selectedDroneId: action.droneId };
 
+    case "SET_SYSTEM_PROMPT":
+      return { ...state, systemPrompt: action.prompt };
+
+    case "SET_MCP_TOOLS":
+      return { ...state, mcpTools: action.tools };
+
     case "RESET":
       return { ...initialState };
 
@@ -131,6 +145,7 @@ function missionReducer(state: MissionState, action: Action): MissionState {
             status: ev.status,
           });
           if (ev.status === "started") {
+            _nextContextId = 1;
             return {
               ...state,
               running: true,
@@ -144,6 +159,7 @@ function missionReducer(state: MissionState, action: Action): MissionState {
               droneTrails: {},
               logs: [],
               selectedDroneId: null,
+              contextMessages: [],
             };
           }
           if (ev.status === "stopped" || ev.status === "error") {
@@ -192,6 +208,24 @@ function missionReducer(state: MissionState, action: Action): MissionState {
             ),
           };
 
+        case "step_start": {
+          logDebug("store.missionReducer", "Step start event", {
+            step: ev.step,
+          });
+          const inputMsg: ContextMessage = {
+            id: _nextContextId++,
+            type: "input",
+            text: `Step ${ev.step}`,
+            context: ev.context,
+            tick: state.tick,
+          };
+          const sCtx = [...state.contextMessages, inputMsg];
+          return {
+            ...state,
+            contextMessages: sCtx.length > MAX_CONTEXT_MSGS ? sCtx.slice(-MAX_CONTEXT_MSGS) : sCtx,
+          };
+        }
+
         case "reasoning": {
           logDebug("store.missionReducer", "Reasoning event", {
             tick: state.tick,
@@ -206,6 +240,13 @@ function missionReducer(state: MissionState, action: Action): MissionState {
             battery: -1,
           };
           const rLogs = [...state.logs, reasoningLog];
+          const assistantMsg: ContextMessage = {
+            id: _nextContextId++,
+            type: "reasoning",
+            text: ev.text,
+            tick: state.tick,
+          };
+          const rCtx = [...state.contextMessages, assistantMsg];
           return {
             ...state,
             events: pushEvent(
@@ -213,6 +254,7 @@ function missionReducer(state: MissionState, action: Action): MissionState {
               "AI: " + ev.text.substring(0, 70),
             ),
             logs: rLogs.length > MAX_LOGS ? rLogs.slice(-MAX_LOGS) : rLogs,
+            contextMessages: rCtx.length > MAX_CONTEXT_MSGS ? rCtx.slice(-MAX_CONTEXT_MSGS) : rCtx,
           };
         }
 
@@ -232,6 +274,21 @@ function missionReducer(state: MissionState, action: Action): MissionState {
             battery: -1,
           };
           const tLogs = [...state.logs, toolLog];
+          const toolCallMsg: ContextMessage = {
+            id: _nextContextId++,
+            type: "tool_call",
+            tool_name: ev.tool_name,
+            params: ev.params,
+            tick: state.tick,
+          };
+          const toolResultMsg: ContextMessage = {
+            id: _nextContextId++,
+            type: "tool_result",
+            tool_name: ev.tool_name,
+            result: ev.result,
+            tick: state.tick,
+          };
+          const tCtx = [...state.contextMessages, toolCallMsg, toolResultMsg];
           return {
             ...state,
             events: pushEvent(
@@ -239,6 +296,7 @@ function missionReducer(state: MissionState, action: Action): MissionState {
               `TOOL: ${ev.tool_name}`,
             ),
             logs: tLogs.length > MAX_LOGS ? tLogs.slice(-MAX_LOGS) : tLogs,
+            contextMessages: tCtx.length > MAX_CONTEXT_MSGS ? tCtx.slice(-MAX_CONTEXT_MSGS) : tCtx,
           };
         }
 

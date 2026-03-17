@@ -87,6 +87,33 @@ if _FRONTEND_DIST.is_dir():
 # ── routes ────────────────────────────────────────────────────────────────────
 
 
+@app.get("/context/system-prompt", tags=["context"])
+async def get_system_prompt() -> dict:
+    """Return the ARIA system prompt used by the LLM agent."""
+    from agent.prompts import SYSTEM_PROMPT
+
+    return {"system_prompt": SYSTEM_PROMPT}
+
+
+@app.get("/context/mcp-tools", tags=["context"])
+async def get_mcp_tools() -> dict:
+    """Return the registered MCP tool definitions (name, description, parameters)."""
+    import mcp_server.context as _mcp_ctx
+    import mcp_server.server  # noqa: F401 — ensures tools are registered
+
+    tools = await _mcp_ctx.mcp.list_tools()
+    return {
+        "tools": [
+            {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.parameters,
+            }
+            for t in tools
+        ]
+    }
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def serve_dashboard() -> HTMLResponse:
     """Serve the frontend index.html."""
